@@ -116,13 +116,28 @@ def run_delete(csv_path: str, manifest_path: str, config: dict) -> None:
     if not os.path.exists(manifest_path):
         raise FileNotFoundError(f"Manifest not found: {manifest_path}")
 
-    manifest_paths: set[str] = set()
-    with open(manifest_path, newline="", encoding="utf-8") as f:
-        for row in csv.DictReader(f):
-            if row.get("path"):
-                manifest_paths.add(row["path"])
-
     df = pd.read_csv(csv_path, dtype=str)
+    manifest_paths = _load_manifest_paths(manifest_path)
+    current_delete_paths = _current_delete_paths(df)
+
+    if manifest_paths != current_delete_paths:
+        missing_from_manifest = sorted(current_delete_paths - manifest_paths)
+        stale_manifest_entries = sorted(manifest_paths - current_delete_paths)
+        details = []
+        if missing_from_manifest:
+            details.append(
+                f"missing {len(missing_from_manifest)} current delete path(s), e.g. {missing_from_manifest[0]}"
+            )
+        if stale_manifest_entries:
+            details.append(
+                f"contains {len(stale_manifest_entries)} stale path(s), e.g. {stale_manifest_entries[0]}"
+            )
+        detail_text = "; ".join(details) if details else "manifest contents differ from the current CSV"
+        raise ValueError(
+            "Manifest does not match the current CSV state. "
+            f"Regenerate the manifest before deleting: {detail_text}."
+        )
+
     if "delete_status" not in df.columns:
         df["delete_status"] = ""
 
@@ -206,6 +221,24 @@ def _append_kept_hashes(copied_rows: list[dict], config: dict) -> None:
         if write_header:
             writer.writeheader()
         writer.writerows(copied_rows)
+
+
+def _load_manifest_paths(manifest_path: str) -> set[str]:
+    manifest_paths: set[str] = set()
+    with open(manifest_path, newline="", encoding="utf-8") as f:
+        for row in csv.DictReader(f):
+            if row.get("path"):
+                manifest_paths.add(row["path"])
+    return manifest_paths
+
+
+def _current_delete_paths(df: pd.DataFrame) -> set[str]:
+    eff_decision = resolve_all(df, "decision")
+    return {
+        str(df.at[idx, "path"])
+        for idx in df.index
+        if eff_decision[idx] is not None and str(eff_decision[idx]).strip().upper() == "DELETE"
+    }
 
 
 def _resolve_source(df: pd.DataFrame, path: str, column: str) -> tuple[str | None, str]:

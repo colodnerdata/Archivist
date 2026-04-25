@@ -4,7 +4,7 @@ import os
 import pandas as pd
 import pytest
 
-from executor import run_copy, run_manifest
+from executor import run_copy, run_delete, run_manifest
 
 
 @pytest.fixture
@@ -178,3 +178,107 @@ def test_manifest_does_not_include_keep(tmp_path, basic_config):
         rows = list(csv.DictReader(f))
 
     assert len(rows) == 0
+
+
+def test_delete_rejects_stale_manifest(tmp_path, basic_config):
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    doomed = src_dir / "doomed.txt"
+    doomed.write_text("delete me")
+    spared = src_dir / "spared.txt"
+    spared.write_text("keep me")
+
+    csv_path = str(tmp_path / "drive.csv")
+    manifest_path = str(tmp_path / "delete_manifest.csv")
+
+    _write_csv(csv_path, [
+        {
+            "path": str(doomed),
+            "filename": "doomed.txt",
+            "extension": ".txt",
+            "is_dir": "False",
+            "size_bytes": str(doomed.stat().st_size),
+            "modified": "",
+            "md5_hash": "",
+            "is_duplicate": "False",
+            "recommendation": "",
+            "confidence": "",
+            "comment": "",
+            "review": "",
+            "decision": "KEEP",
+            "summary": "",
+            "organized_path": "",
+            "copy_status": "",
+            "delete_status": "",
+        },
+        {
+            "path": str(spared),
+            "filename": "spared.txt",
+            "extension": ".txt",
+            "is_dir": "False",
+            "size_bytes": str(spared.stat().st_size),
+            "modified": "",
+            "md5_hash": "",
+            "is_duplicate": "False",
+            "recommendation": "",
+            "confidence": "",
+            "comment": "",
+            "review": "",
+            "decision": "DELETE",
+            "summary": "",
+            "organized_path": "",
+            "copy_status": "",
+            "delete_status": "",
+        },
+    ])
+
+    with open(manifest_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=["path", "filename", "size_bytes", "decision_source"])
+        writer.writeheader()
+        writer.writerow({
+            "path": str(doomed),
+            "filename": "doomed.txt",
+            "size_bytes": str(doomed.stat().st_size),
+            "decision_source": "EXPLICIT",
+        })
+
+    with pytest.raises(ValueError, match="Manifest does not match"):
+        run_delete(csv_path, manifest_path, basic_config)
+
+    assert doomed.exists()
+    assert spared.exists()
+
+
+def test_delete_accepts_matching_manifest(tmp_path, basic_config):
+    src_file = tmp_path / "doomed.txt"
+    src_file.write_text("delete me")
+    csv_path = str(tmp_path / "drive.csv")
+
+    _write_csv(csv_path, [{
+        "path": str(src_file),
+        "filename": "doomed.txt",
+        "extension": ".txt",
+        "is_dir": "False",
+        "size_bytes": str(src_file.stat().st_size),
+        "modified": "",
+        "md5_hash": "",
+        "is_duplicate": "False",
+        "recommendation": "",
+        "confidence": "",
+        "comment": "",
+        "review": "",
+        "decision": "DELETE",
+        "summary": "",
+        "organized_path": "",
+        "copy_status": "",
+        "delete_status": "",
+    }])
+
+    run_manifest(csv_path, basic_config)
+    manifest_path = os.path.join(os.path.dirname(csv_path), "delete_manifest.csv")
+
+    run_delete(csv_path, manifest_path, basic_config)
+
+    assert not src_file.exists()
+    df = pd.read_csv(csv_path, dtype=str)
+    assert df.loc[0, "delete_status"] == "DELETED"
