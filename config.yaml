@@ -1,0 +1,40 @@
+# Ollama
+ollama_base_url: "http://localhost:11434"
+triage_model: "phi4:14b"
+summarize_model: "phi4:14b"
+# vision_model must be a vision-capable Ollama model (llava, moondream, etc.)
+# phi4:14b is text-only and cannot process images.
+vision_model: "llava:13b"
+
+# Performance
+triage_batch_size: 50
+max_text_tokens: 2000
+
+# Cross-drive deduplication registry
+kept_hashes_path: "kept_hashes.csv"
+
+# Recovery destination root
+recovery_root: "E:\\recovered"
+
+# Scan exclusions
+exclude_dirs:
+  - "$RECYCLE.BIN"
+  - "System Volume Information"
+  - "Windows"
+  - "Program Files"
+  - "Program Files (x86)"
+  - "ProgramData"
+  - "AppData"
+
+exclude_extensions:
+  - .exe
+  - .msi
+  - .dll
+  - .sys
+  - .tmp
+  - .log
+  - .ini
+  - .lnk
+  - .url
+  - .db
+  - .cache

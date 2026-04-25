@@ -1,0 +1,256 @@
+# Archivist — First Commit Plan
+
+## Context
+
+The repo contains only the design document (`archivist_design.md`) and no Python code. This plan covers the first commit: a fully runnable foundation through Phase 2 (Scan + Triage). Later phases (Summarize, Organize, Execute) are left for future commits.
+
+The goal is a commit where `scan` and `triage` work end-to-end on a real drive, `resolve` works as a diagnostic, and all future commands print a clean "not yet implemented" message.
+
+---
+
+## Files to Create
+
+```
+archivist/
+├── .gitignore
+├── requirements.txt
+├── config.yaml
+├── archivist.py       # CLI entry point
+├── inheritance.py     # Hierarchy resolution (shared by Phases 4–6)
+├── scanner.py         # Phase 1 — fully implemented
+└── triager.py         # Phase 2 — fully implemented
+```
+
+---
+
+## `.gitignore`
+
+Standard Python entries plus project-specific:
+- `reports/` — output CSVs are machine-local, not source
+- `kept_hashes.csv` — grows as drives are processed; machine-local state
+- `delete_manifest.csv`
+- `*.log`
+- `.venv/`, `venv/`, `__pycache__/`, `*.pyc`
+- `.vscode/`, `.idea/`
+
+Do **not** gitignore `config.yaml` — it's source-controlled configuration.
+
+---
+
+## `requirements.txt`
+
+```
+pandas>=2.0
+pyyaml>=6.0
+requests>=2.31
+tqdm>=4.66
+python-docx>=1.1
+pdfplumber>=0.10
+openpyxl>=3.1
+Pillow>=10.0
+```
+
+`hashlib`, `csv`, `os`, `pathlib` are stdlib — do not list.
+
+---
+
+## `config.yaml`
+
+Exactly as in the design document. Key note: `exclude_dirs` entries are **bare directory name matches** (matched against `os.path.basename`), not full path prefixes — so `AppData` matches anywhere in the tree.
+
+---
+
+## `inheritance.py`
+
+### Public API
+
+**`resolve_effective(df, row_path, column) → value | None`**
+
+1. Look up the row's own value in `column`. If non-blank, return it.
+2. Build the list of ancestor paths by stripping path components one at a time using `pathlib.PurePosixPath` or `PureWindowsPath` (auto-detect by checking if path contains `:`  or `\`). Walk upward until the root.
+3. For each ancestor (nearest first), find matching rows in `df` where `path == ancestor`. If a match has a non-blank value in `column`, return it.
+4. If nothing found, return `None`.
+
+**`resolve_all(df, column) → Series`**
+
+Calls `resolve_effective` for every row. Used by Phases 4–6 to process the whole CSV at once.
+
+### Implementation notes
+- "Non-blank" = not `NaN`, not `None`, not empty string after strip.
+- Path comparison is **case-insensitive** on Windows paths (paths containing `:` or `\`). Use `.lower()` on both sides.
+- The lookup does **not** filter to `is_dir=True` — any ancestor row (file or directory) with a value wins.
+- Do not mutate the DataFrame. Return values only.
+
+---
+
+## `scanner.py`
+
+### Entry point
+`run_scan(drive_path, output_csv, config)`
+
+### CSV header (Phase 1 writes all these columns upfront)
+```
+path, filename, extension, is_dir, size_bytes, modified,
+md5_hash, is_duplicate, recommendation, confidence, comment
+```
+Writing `recommendation/confidence/comment` in Phase 1 (blank for most rows) avoids column-adding logic in Phase 2. Excluded directories get pre-populated values here.
+
+### Logic
+
+**A. Setup**
+- Load `kept_hashes.csv` into a `{md5_hash: row}` dict (O(1) lookup). Absent file → empty dict.
+- If `output_csv` exists, read its `path` column into an **already-seen set** for resume.
+- Open CSV in append mode (existing) or write mode (new). Use `csv.writer` — never accumulate rows in memory.
+
+**B. Exclusion rules** (from config)
+- `exclude_dirs`: matched against `os.path.basename(dirpath)`. If matched:
+  - Write a directory row with `recommendation=SKIP, confidence=0.99, comment="Excluded by config"`.
+  - Remove from `dirnames` in-place (prunes the subtree from `os.walk`).
+- `exclude_extensions`: matched against `os.path.splitext(filename)[1].lower()`. Excluded files get **no row at all** — they are definitionally junk (.dll, .exe, etc.).
+
+**C. Walk loop** — `os.walk(drive_path, topdown=True, onerror=log_error)`
+
+For each `(dirpath, dirnames, filenames)`:
+
+1. **Directory row** for `dirpath` (skip if already seen; skip the drive root itself):
+   - `path=dirpath, filename="", extension="", is_dir=True, size_bytes=0`
+   - `modified` from `os.path.getmtime` as ISO 8601
+   - `md5_hash="", is_duplicate=False`
+   - Write immediately.
+
+2. **Filter `dirnames` in-place** for exclusions.
+
+3. **File rows** for each file:
+   - Skip if already seen.
+   - Skip if extension excluded.
+   - `size_bytes` via `os.path.getsize` (catch `OSError`, log, skip).
+   - MD5: read in 64KB chunks with `hashlib.md5()`. On `OSError`, use `md5_hash=""`, `comment="Unreadable"`.
+   - `is_duplicate=True` if hash is in `kept_hashes` dict OR in `seen_hashes` (within-drive set).
+   - Add hash to `seen_hashes` if not duplicate.
+   - Write immediately.
+
+**D. Progress** — `tqdm` with no known total, showing files/sec and truncated current path.
+
+---
+
+## `triager.py`
+
+### Entry point
+`run_triage(csv_path, config)`
+
+### Logic
+
+**A.** Load full CSV into a pandas DataFrame (acceptable — it's already-written, not accumulating).
+
+**B. Duplicates first** — rows where `is_duplicate=True` and `recommendation` is blank:
+- Set `recommendation=SKIP, confidence=0.99, comment="Duplicate of [md5_hash]"`.
+- Write CSV immediately (captures this work before LLM calls).
+
+**C. Batching** — remaining rows with blank `recommendation` → chunks of `config["triage_batch_size"]` (default 50).
+
+**D. LLM call per batch**
+
+1. Build items list: `{path, filename, extension, is_dir, size_bytes, modified}` per row.
+2. Construct prompt exactly as in the design document.
+3. POST to `{ollama_base_url}/api/generate` with `stream=false`.
+4. Extract JSON from response:
+   - Strip markdown code fences via regex `` r'```(?:json)?\s*([\s\S]*?)```' ``.
+   - If no fence, find first `[` and last `]` and extract that substring.
+   - Attempt `json.loads`.
+5. On success: match result objects back to rows by `path`. Update DataFrame in-place.
+6. On parse failure: retry once with stricter prompt (see below). Second failure → mark entire batch `recommendation=REVIEW, confidence=0.5, comment="LLM parse error — manual review needed"`.
+
+**Retry prompt** (tightened):
+```
+Return ONLY a valid JSON array. No markdown, no explanation, no preamble.
+Each object must have exactly these keys: path, recommendation, confidence, comment.
+Valid values for recommendation: INTERESTING, REVIEW, SKIP.
+confidence must be a float between 0.0 and 1.0.
+Items: [same JSON array]
+```
+
+**E.** After each batch, write full DataFrame back to CSV with `df.to_csv(csv_path, index=False)`.
+
+**F. Startup check** — GET `{ollama_base_url}/api/tags`. If Ollama is not reachable or the model is not in the list, print a clear error with `ollama serve` / `ollama pull phi4:14b` instructions and exit 1.
+
+**G. Progress** — `tqdm` over batches, showing batch number and rows updated.
+
+---
+
+## `archivist.py`
+
+Use `argparse` with subparsers. No third-party CLI libraries.
+
+### Shared
+`load_config(path="config.yaml")` — reads YAML, exits with clear error if file absent.
+
+### Subcommands
+
+| Command | Args | Behavior |
+|---|---|---|
+| `scan` | `--drive`, `--output`, `[--config]` | Calls `scanner.run_scan()` |
+| `triage` | `--csv`, `[--config]` | Calls `triager.run_triage()` |
+| `summarize` | `--csv` | Prints "Phase 4 not yet implemented." |
+| `organize` | `--csv` | Prints "Phase 5 not yet implemented." |
+| `copy` | `--csv`, `--dest` | Prints "Phase 6a not yet implemented." |
+| `manifest` | `--csv` | Prints "Phase 6b not yet implemented." |
+| `delete` | `--csv`, `--manifest`, `--confirm` | Prints "Phase 6c not yet implemented." |
+| `resolve` | `--csv`, `--path` | **Fully implemented** — loads CSV, calls `resolve_effective` for both `review` and `decision`, prints value + source (explicit / inherited from [path]) |
+
+All subcommand handlers wrapped in top-level `try/except` — print friendly error, `sys.exit(1)`. No raw tracebacks.
+
+---
+
+## Key Design Decisions
+
+1. **Phase 1 writes `recommendation/confidence/comment` columns** — empty for most rows, pre-populated for excluded directories. Removes the need for column-addition logic in Phase 2.
+
+2. **Phase 2 keeps full CSV in memory** (pandas) — appropriate since it's reading an already-written file. Phase 1 streams because it accumulates; Phase 2 doesn't.
+
+3. **Excluded dirs get a row; excluded file extensions get no row** — directories might hide personal content in renamed subfolders; .dll/.exe files have zero recovery value and pollute the CSV.
+
+4. **Drive root gets no row** — emitting `D:\` as a directory row creates a spurious ancestor that could inadvertently cascade decisions to the entire drive.
+
+5. **Resume via already-seen set** — built from `path` column of existing CSV at startup. `os.walk` order is deterministic, so a resumed scan naturally picks up where it left off. Works correctly even if interrupted mid-directory.
+
+---
+
+## Verification
+
+**Setup:**
+```bash
+python -m venv .venv && .venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+**Phase 1:**
+```bash
+python archivist.py scan --drive <test_dir> --output reports/test.csv
+```
+- CSV exists with correct columns.
+- `AppData` dir appears as a row with `recommendation=SKIP`.
+- `.exe` files do not appear.
+- Files with identical content: one has `is_duplicate=False`, duplicate has `is_duplicate=True`.
+- Kill mid-run, re-run → row count increases, no duplicates.
+
+**Phase 2:**
+```bash
+python archivist.py triage --csv reports/test.csv
+```
+- `is_duplicate=True` rows → `recommendation=SKIP, confidence=0.99` (no LLM call).
+- Remaining rows have `recommendation` filled.
+- Kill mid-run, re-run → already-triaged rows not re-sent to LLM.
+- Stop Ollama, run triage → clear error message with instructions.
+
+**resolve command:**
+```bash
+python archivist.py resolve --csv reports/test.csv --path "D:\Users\Stephen\Documents"
+```
+- Set `decision=KEEP` on a directory row manually, then check a child file — should show `KEEP (inherited from ...)`.
+- Set explicit `decision=DELETE` on the child → should show `DELETE (explicit)`.
+
+**Unimplemented commands:**
+```bash
+python archivist.py summarize --csv reports/test.csv
+# → "Phase 4 not yet implemented." exit 0
+```
