@@ -182,8 +182,6 @@ Run tests:
 pytest -q
 ```
 
-Current test status in this workspace: 46 passing.
-
 ## Operational Notes
 
 - On WSL, `/mnt/d/` is usually more reliable than `D:\` because shell escaping
