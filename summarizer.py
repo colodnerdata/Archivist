@@ -24,11 +24,20 @@ _VISION_PROMPT = (
     "whether it appears personal (family, event, selfie) vs generic (stock, meme, download)."
 )
 
+_COMPLEX_PDF_PROMPT_TEMPLATE = """Summarize this document in 2-3 sentences. This PDF appears to contain more than plain text (embedded images, charts, diagrams, forms, or very sparse text suggesting scanned pages). Focus on:
+- What the document is about
+- Whether it appears personal/unique vs generic/downloaded
+- Any notable names, dates, projects, or topics
+
+{text}"""
+
 
 def run_summarize(csv_path: str, config: dict) -> None:
     summarize_model = config["summarize_model"]
     vision_model = config["vision_model"]
-    llm_client.check_ollama(config["ollama_base_url"], [summarize_model, vision_model])
+    vision_pdf_model = config.get("vision_pdf_model", vision_model)
+    models_needed = list({summarize_model, vision_model, vision_pdf_model})
+    llm_client.check_ollama(config["ollama_base_url"], models_needed)
 
     df = pd.read_csv(csv_path, dtype=str)
 
@@ -57,6 +66,12 @@ def run_summarize(csv_path: str, config: dict) -> None:
             elif content_type == "image_b64":
                 summary = llm_client.chat_with_image(
                     config["ollama_base_url"], vision_model, _VISION_PROMPT, content
+                )
+            elif content_type == "complex_pdf":
+                truncated = _truncate_to_tokens(content, int(config.get("max_text_tokens", 2000)))
+                prompt = _COMPLEX_PDF_PROMPT_TEMPLATE.format(text=truncated)
+                summary = llm_client.generate(
+                    config["ollama_base_url"], vision_pdf_model, prompt, temperature=0.3
                 )
             else:
                 truncated = _truncate_to_tokens(content, int(config.get("max_text_tokens", 2000)))
