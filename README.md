@@ -162,8 +162,9 @@ Review `reports/delete_manifest.csv` before deleting anything.
 python archivist.py delete --csv reports/drive_d.csv --manifest reports/delete_manifest.csv --confirm
 ```
 
-The current implementation requires `--confirm` and a manifest path. It does
-not yet validate that the manifest still matches the current CSV state.
+The current implementation requires `--confirm` and a manifest path. It
+validates that the manifest still matches the current CSV state and aborts if
+a mismatch is detected.
 
 ## Other Commands
 
