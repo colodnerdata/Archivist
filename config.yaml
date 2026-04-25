@@ -9,7 +9,7 @@ vision_model: "qwen3-vl:8b"
 vision_pdf_model: "qwen3-vl:8b-thinking"
 
 # Performance
-triage_batch_size: 50
+triage_batch_size: 1
 max_text_tokens: 2000
 
 # Cross-drive deduplication registry

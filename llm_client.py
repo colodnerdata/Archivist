@@ -2,7 +2,7 @@ import sys
 
 import requests
 
-_TIMEOUT = 120
+_TIMEOUT = 240
 
 
 def check_ollama(base_url: str, models_required: list[str]) -> None:
