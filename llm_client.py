@@ -1,4 +1,5 @@
 import sys
+import json
 
 import requests
 
@@ -26,14 +27,48 @@ def check_ollama(base_url: str, models_required: list[str]) -> None:
         sys.exit(1)
 
 
-def generate(base_url: str, model: str, prompt: str, temperature: float = 0.1) -> str:
+def generate(
+    base_url: str,
+    model: str,
+    prompt: str,
+    temperature: float = 0.1,
+    stream: bool = False,
+    stream_to_stdout: bool = False,
+) -> str:
     resp = requests.post(
         f"{base_url}/api/generate",
-        json={"model": model, "prompt": prompt, "stream": False, "options": {"temperature": temperature}},
+        json={"model": model, "prompt": prompt, "stream": stream, "options": {"temperature": temperature}},
         timeout=_TIMEOUT,
+        stream=stream,
     )
     resp.raise_for_status()
-    return resp.json()["response"]
+
+    if not stream:
+        return resp.json()["response"]
+
+    chunks: list[str] = []
+    for line in resp.iter_lines(decode_unicode=True):
+        if not line:
+            continue
+
+        raw = line.strip()
+        if raw.startswith("data:"):
+            raw = raw[5:].strip()
+
+        payload = json.loads(raw)
+        piece = payload.get("response", "")
+        if piece:
+            chunks.append(piece)
+            if stream_to_stdout:
+                print(piece, end="", flush=True)
+
+        if payload.get("done"):
+            break
+
+    if stream_to_stdout:
+        print()
+
+    return "".join(chunks)
 
 
 def chat_with_image(base_url: str, model: str, prompt: str, image_b64: str, temperature: float = 0.3) -> str:
