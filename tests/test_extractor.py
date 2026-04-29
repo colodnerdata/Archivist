@@ -66,7 +66,7 @@ def _make_mock_pdf(pages_text: list[str], pages_images: list[list]) -> MagicMock
         mock_pages.append(page)
 
     pdf = MagicMock()
-    pdf.__enter__ = lambda s: s
+    pdf.__enter__ = MagicMock(return_value=pdf)
     pdf.__exit__ = MagicMock(return_value=False)
     pdf.pages = mock_pages
     return pdf
