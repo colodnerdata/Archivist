@@ -1,7 +1,7 @@
 # Ollama
 ollama_base_url: "http://localhost:11434"
 triage_model: "qwen3:4b"
-summarize_model: "phi4:14b"
+summarize_model: "qwen3:8b"
 # vision_model is used for images.
 vision_model: "qwen3-vl:8b"
 # vision_pdf_model is used for PDFs detected as more than plain text
