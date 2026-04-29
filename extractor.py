@@ -20,14 +20,19 @@ _IMAGE_EXTENSIONS = {
 def extract(file_path: str, extension: str, config: dict) -> tuple[str, str]:
     """
     Returns (content_type, content).
-    content_type: 'text' | 'image_b64' | 'error'
+    content_type: 'text' | 'complex_pdf' | 'image_b64' | 'error'
+
+    'complex_pdf' signals that the PDF contains embedded images, very sparse
+    text, or other indicators that it is more than plain text.  The caller
+    should route it to a vision/thinking model rather than a plain text model.
     """
     ext = extension.lower()
     try:
         if ext == ".docx":
             return ("text", _extract_docx(file_path))
         elif ext == ".pdf":
-            return ("text", _extract_pdf(file_path))
+            text, is_complex = _extract_pdf(file_path)
+            return ("complex_pdf" if is_complex else "text", text)
         elif ext == ".xlsx":
             return ("text", _extract_xlsx(file_path))
         elif ext in _IMAGE_EXTENSIONS:
@@ -51,15 +56,37 @@ def _extract_docx(file_path: str) -> str:
     return "\n".join(paragraphs)
 
 
-def _extract_pdf(file_path: str) -> str:
+# Average chars-per-page below this threshold indicates sparse text content
+# (scanned pages, chart-heavy slides, forms, etc.) and triggers the thinking model.
+_PDF_SPARSE_TEXT_THRESHOLD = 100
+
+
+def _extract_pdf(file_path: str) -> tuple[str, bool]:
+    """Return (extracted_text, is_complex).
+
+    is_complex is True when the PDF has embedded images on any page, or when
+    the average extracted character count per page is below
+    _PDF_SPARSE_TEXT_THRESHOLD, suggesting the document is scanned, form-heavy,
+    or relies on charts/diagrams rather than prose.
+    """
     import pdfplumber
-    pages = []
+    pages: list[str] = []
+    total_chars = 0
+    has_embedded_images = False
+
     with pdfplumber.open(file_path) as pdf:
+        n_pages = len(pdf.pages)
         for page in pdf.pages:
+            if page.images:
+                has_embedded_images = True
             text = page.extract_text()
             if text:
+                total_chars += len(text)
                 pages.append(text)
-    return "\n".join(pages)
+
+    sparse = n_pages > 0 and (total_chars / n_pages) < _PDF_SPARSE_TEXT_THRESHOLD
+    is_complex = has_embedded_images or sparse
+    return "\n".join(pages), is_complex
 
 
 def _extract_xlsx(file_path: str) -> str:
