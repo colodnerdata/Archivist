@@ -2,7 +2,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from extractor import _PDF_SPARSE_TEXT_THRESHOLD, _extract_pdf, _truncate_to_tokens, extract
+from extractor import _PDF_SPARSE_TEXT_THRESHOLD, _truncate_to_tokens, extract
 
 
 def test_extract_text_file(tmp_path):
