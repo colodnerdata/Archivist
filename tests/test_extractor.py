@@ -127,7 +127,7 @@ def test_pdf_dense_text_no_images_returns_text(tmp_path):
     assert content_type == "text"
 
 
-def test_pdf_empty_returns_complex_pdf_not_raising(tmp_path):
+def test_pdf_empty_returns_text_not_raising(tmp_path):
     """A zero-page PDF should not raise; falls through as non-complex (no pages to check)."""
     f = tmp_path / "empty.pdf"
     f.write_bytes(b"%PDF-1.4 fake")
