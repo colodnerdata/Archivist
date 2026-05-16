@@ -1,20 +1,26 @@
 # Ollama
-ollama_base_url: "http://localhost:11434"
-triage_model: "phi4:14b"
+ollama_base_url: "http://172.26.32.1:11434"
+triage_model: "qwen3:4b"
 summarize_model: "phi4:14b"
 # vision_model must be a vision-capable Ollama model (llava, moondream, etc.)
 # phi4:14b is text-only and cannot process images.
-vision_model: "llava:13b"
+vision_model: "qwen3-vl:8b"
+vision_reasoning_model: "qwen3-vl:8b-thinking"
 
 # Performance
 triage_batch_size: 50
 max_text_tokens: 2000
+estimate_scan_progress: true
 
 # Cross-drive deduplication registry
 kept_hashes_path: "kept_hashes.csv"
 
+# Optional: treat a previously scanned CSV as an authoritative baseline.
+# Example: scan C first, then set this to reports/drive_c.csv before scanning D or E.
+baseline_scan_csv: "reports/drive_c.csv"
+
 # Recovery destination root
-recovery_root: "E:\\recovered"
+recovery_root: "/mnt/e/recovered"
 
 # Scan exclusions
 exclude_dirs:
@@ -25,6 +31,20 @@ exclude_dirs:
   - "Program Files (x86)"
   - "ProgramData"
   - "AppData"
+  # Windows NTFS junction points in user profiles (legacy redirects, always inaccessible)
+  - "Application Data"
+  - "Cookies"
+  - "Local Settings"
+  - "My Documents"
+  - "NetHood"
+  - "PrintHood"
+  - "Recent"
+  - "SendTo"
+  - "Start Menu"
+  - "Templates"
+  - "My Music"
+  - "My Pictures"
+  - "My Videos"
 
 exclude_extensions:
   - .exe

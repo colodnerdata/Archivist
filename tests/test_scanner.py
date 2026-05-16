@@ -94,20 +94,52 @@ def test_md5_duplicate_detection(tmp_path, basic_config):
     assert len(non_dups) == 1
     dup_filenames = [r["filename"] for r in dups]
     assert any(fn in ("a.txt", "b.txt") for fn in dup_filenames)
+    assert dups[0]["duplicate_kind"] == "same_drive"
+    assert dups[0]["duplicate_source_path"] != ""
+
+
+def test_baseline_scan_duplicate_detection(tmp_path, basic_config):
+    baseline_csv = tmp_path / "drive_c.csv"
+    baseline_path = r"C:\Users\Stephen\Documents\keep.txt"
+    baseline_hash, _ = _compute_md5(str(_write_file(tmp_path / "baseline_source.txt", b"same content")))
+    baseline_csv.write_text(
+        "path,md5_hash\n"
+        f"{baseline_path},{baseline_hash}\n",
+        encoding="utf-8",
+    )
+    basic_config["baseline_scan_csv"] = str(baseline_csv)
+
+    scan_dir = tmp_path / "drive_d"
+    scan_dir.mkdir()
+    (scan_dir / "dup.txt").write_bytes(b"same content")
+
+    out_csv = str(tmp_path / "out.csv")
+    run_scan(str(scan_dir), out_csv, basic_config)
+
+    with open(out_csv, newline="", encoding="utf-8") as f:
+        rows = [r for r in csv.DictReader(f) if r["is_dir"] == "False"]
+
+    assert len(rows) == 1
+    assert rows[0]["is_duplicate"].lower() == "true"
+    assert rows[0]["duplicate_kind"] == "baseline_scan"
+    assert rows[0]["duplicate_source_path"] == baseline_path
+    assert "baseline scan file" in rows[0]["comment"]
 
 
 def test_compute_md5_consistent(tmp_path):
     f = tmp_path / "data.bin"
     f.write_bytes(b"test data 12345")
-    h1 = _compute_md5(str(f))
-    h2 = _compute_md5(str(f))
+    h1, err1 = _compute_md5(str(f))
+    h2, err2 = _compute_md5(str(f))
     assert h1 == h2
     assert len(h1) == 32
+    assert err1 == ""
+    assert err2 == ""
 
 
 def test_compute_md5_missing_file(tmp_path):
-    result = _compute_md5(str(tmp_path / "nonexistent.txt"))
-    assert result == ""
+    md5, err = _compute_md5(str(tmp_path / "nonexistent.txt"))
+    assert md5 == ""
 
 
 def test_load_kept_hashes_missing_file(tmp_path):
@@ -150,16 +182,29 @@ def test_inaccessible_dir_gets_recorded(tmp_path, basic_config, monkeypatch):
 def test_scan_progress_mentions_ctrl_c(tmp_path, basic_config, monkeypatch):
     captured = {}
 
-    def fake_tqdm(iterable, **kwargs):
-        captured.update(kwargs)
-        return iterable
+    class FakeTqdm:
+        def __init__(self, *args, **kwargs):
+            captured.update(kwargs)
+
+        def update(self, amount):
+            captured["last_update"] = amount
+
+        def close(self):
+            captured["closed"] = True
+
+    def fake_tqdm(*args, **kwargs):
+        return FakeTqdm(*args, **kwargs)
 
     monkeypatch.setattr(scanner, "tqdm", fake_tqdm)
 
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "note.txt").write_text("hello")
     out_csv = str(tmp_path / "out.csv")
     run_scan(str(tmp_path), out_csv, basic_config)
 
     assert "Ctrl+C" in captured["desc"]
+    assert captured["total"] >= 2
+    assert captured["closed"] is True
 
 
 def test_scan_interrupt_prints_resume_message(tmp_path, basic_config, monkeypatch, capsys):
@@ -174,3 +219,8 @@ def test_scan_interrupt_prints_resume_message(tmp_path, basic_config, monkeypatc
 
     captured = capsys.readouterr()
     assert "resume" in captured.err.lower()
+
+
+def _write_file(path, content: bytes):
+    path.write_bytes(content)
+    return path

@@ -27,3 +27,4 @@ delete_manifest.csv
 .DS_Store
 Thumbs.db
 desktop.ini
+.aider*

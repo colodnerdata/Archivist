@@ -58,8 +58,15 @@ def run_triage(csv_path: str, config: dict) -> None:
 
 def _mark_duplicates(df: pd.DataFrame) -> pd.DataFrame:
     dup_mask = df.get("is_duplicate", pd.Series(dtype=str)).str.lower() == "true"
+    baseline_dup_mask = dup_mask & (df.get("duplicate_kind", pd.Series(dtype=str)).fillna("") == "baseline_scan")
+
+    if "decision" not in df.columns:
+        df["decision"] = ""
+
     df.loc[dup_mask, "recommendation"] = "SKIP"
     df.loc[dup_mask, "confidence"] = "0.99"
+    blank_decision = df.get("decision", pd.Series(dtype=str)).isna() | (df.get("decision", pd.Series(dtype=str)) == "")
+    df.loc[baseline_dup_mask & blank_decision, "decision"] = "DELETE"
     # Only set comment if not already set (scanner may have filled it in)
     no_comment = dup_mask & (df.get("comment", pd.Series(dtype=str)).isna() | (df.get("comment", pd.Series(dtype=str)) == ""))
     df.loc[no_comment, "comment"] = "Duplicate — already in kept_hashes registry"
@@ -91,7 +98,6 @@ Guidance:
 - .exe, .msi, .dll, .sys → SKIP
 - Directories named Windows, Program Files, AppData → SKIP confidence 0.99
 - Directories with personal project names, years, or proper nouns → INTERESTING
-- Files in Downloads with generic names → SKIP
 - Very small files (<1KB) outside project directories → SKIP
 
 Respond ONLY with a valid JSON array. Each object must have keys:
