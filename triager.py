@@ -62,10 +62,11 @@ def _mark_duplicates(df: pd.DataFrame) -> pd.DataFrame:
 
     if "decision" not in df.columns:
         df["decision"] = ""
+    decision = df.get("decision", pd.Series(dtype=str))
 
     df.loc[dup_mask, "recommendation"] = "SKIP"
     df.loc[dup_mask, "confidence"] = "0.99"
-    blank_decision = df.get("decision", pd.Series(dtype=str)).isna() | (df.get("decision", pd.Series(dtype=str)) == "")
+    blank_decision = decision.isna() | (decision == "")
     df.loc[baseline_dup_mask & blank_decision, "decision"] = "DELETE"
     # Only set comment if not already set (scanner may have filled it in)
     no_comment = dup_mask & (df.get("comment", pd.Series(dtype=str)).isna() | (df.get("comment", pd.Series(dtype=str)) == ""))

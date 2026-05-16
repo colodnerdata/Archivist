@@ -222,5 +222,6 @@ def test_scan_interrupt_prints_resume_message(tmp_path, basic_config, monkeypatc
 
 
 def _write_file(path, content: bytes):
+    """Write bytes to ``path`` and return the same path object for chaining."""
     path.write_bytes(content)
     return path

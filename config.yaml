@@ -1,5 +1,6 @@
 # Ollama
-ollama_base_url: "http://172.26.32.1:11434"
+# Override this if Ollama is reachable on a different host, such as a WSL bridge IP.
+ollama_base_url: "http://localhost:11434"
 triage_model: "qwen3:4b"
 summarize_model: "phi4:14b"
 # vision_model must be a vision-capable Ollama model (llava, moondream, etc.)

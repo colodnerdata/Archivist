@@ -1,4 +1,5 @@
 import csv
+import errno
 import hashlib
 import logging
 import os
@@ -228,7 +229,7 @@ def _compute_md5(file_path: str) -> tuple[str, str]:
         return h.hexdigest(), ""
     except OSError as e:
         logger.warning("md5 failed for %s: %s", file_path, e)
-        if e.errno == 22:  # EINVAL — OneDrive cloud-only stub not downloaded
+        if e.errno == errno.EINVAL:  # OneDrive cloud-only stub not downloaded
             return "", "OneDrive cloud-only stub — file not downloaded locally"
         return "", ""
 

@@ -89,10 +89,14 @@ def test_duplicates_report_writes_header_when_empty(tmp_path):
 
     with open(output, newline="", encoding="utf-8") as f:
         rows = list(csv.DictReader(f))
-        fieldnames = rows[0].keys() if rows else next(csv.reader(open(output, newline="", encoding="utf-8")))
+        if rows:
+            fieldnames = list(rows[0].keys())
+        else:
+            f.seek(0)
+            fieldnames = csv.DictReader(f).fieldnames
 
     assert rows == []
-    assert list(fieldnames) == [
+    assert fieldnames == [
         "source_csv",
         "path",
         "filename",
