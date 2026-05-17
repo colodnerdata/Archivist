@@ -47,7 +47,7 @@ def generate(
         return resp.json()["response"]
 
     chunks: list[str] = []
-    for line in resp.iter_lines(decode_unicode=True):
+    for line_number, line in enumerate(resp.iter_lines(decode_unicode=True), start=1):
         if not line:
             continue
 
@@ -55,7 +55,11 @@ def generate(
         if raw.startswith("data:"):
             raw = raw[5:].strip()
 
-        payload = json.loads(raw)
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Failed to decode streamed JSON chunk {line_number}: {raw!r}") from exc
+
         piece = payload.get("response", "")
         if piece:
             chunks.append(piece)

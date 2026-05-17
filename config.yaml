@@ -1,7 +1,7 @@
 # Ollama
 ollama_base_url: "http://localhost:11434"
 triage_model: "qwen3:4b"
-summarize_model: "qwen3:8b"
+summarize_model: "phi4:14b"
 # vision_model is used for images.
 vision_model: "qwen3-vl:8b"
 # vision_pdf_model is used for PDFs detected as more than plain text
@@ -13,8 +13,8 @@ triage_batch_size: 8
 max_text_tokens: 2000
 
 # Triage debugging
-triage_debug_print_prompt: false
-triage_debug_stream_output: false
+triage_debug_print_prompt: true
+triage_debug_stream_output: true
 triage_debug_prompt_batches: 3
 triage_debug_prompt_max_chars: 8000
 
