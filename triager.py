@@ -20,6 +20,11 @@ def run_triage(csv_path: str, config: dict) -> None:
     model = config["triage_model"]
     llm_client.check_ollama(config["ollama_base_url"], [model])
 
+    debug_print_prompt = bool(config.get("triage_debug_print_prompt", False))
+    debug_stream_output = bool(config.get("triage_debug_stream_output", False))
+    debug_prompt_max_chars = int(config.get("triage_debug_prompt_max_chars", 4000))
+    debug_prompt_batches = int(config.get("triage_debug_prompt_batches", 1))
+
     df = pd.read_csv(csv_path, dtype=str)
     df = _mark_duplicates(df)
 
@@ -31,17 +36,49 @@ def run_triage(csv_path: str, config: dict) -> None:
     batch_size = int(config.get("triage_batch_size", 50))
     batches = [needs_triage[i:i + batch_size] for i in range(0, len(needs_triage), batch_size)]
 
-    for batch_indices in tqdm(batches, desc="Triaging", unit=" batches"):
+    for batch_num, batch_indices in enumerate(tqdm(batches, desc="Triaging", unit=" batches"), start=1):
         rows = df.loc[batch_indices, ["path", "filename", "extension", "is_dir", "size_bytes", "modified"]].to_dict("records")
         prompt = _build_batch_prompt(rows)
 
+        if debug_print_prompt and batch_num <= debug_prompt_batches:
+            shown = prompt[:debug_prompt_max_chars]
+            if len(prompt) > debug_prompt_max_chars:
+                shown += "\n... [prompt truncated]"
+            print(f"\n--- TRIAGE PROMPT batch {batch_num}/{len(batches)} ({len(prompt)} chars) ---")
+            print(shown)
+            print("--- END TRIAGE PROMPT ---\n")
+
+        if debug_stream_output:
+            print(f"[triage] batch {batch_num}/{len(batches)} streaming response from model '{model}'...")
+
         try:
-            response = llm_client.generate(config["ollama_base_url"], model, prompt)
+            response = llm_client.generate(
+                config["ollama_base_url"],
+                model,
+                prompt,
+                stream=debug_stream_output,
+                stream_to_stdout=debug_stream_output,
+            )
             results = _parse_llm_response(response)
         except (ValueError, Exception) as e:
             logger.warning("First triage attempt failed (%s), retrying with strict prompt", e)
             try:
-                response = llm_client.generate(config["ollama_base_url"], model, prompt + _STRICT_SUFFIX)
+                strict_prompt = prompt + _STRICT_SUFFIX
+                if debug_print_prompt and batch_num <= debug_prompt_batches:
+                    shown = strict_prompt[:debug_prompt_max_chars]
+                    if len(strict_prompt) > debug_prompt_max_chars:
+                        shown += "\n... [strict prompt truncated]"
+                    print(f"\n--- TRIAGE STRICT PROMPT batch {batch_num}/{len(batches)} ({len(strict_prompt)} chars) ---")
+                    print(shown)
+                    print("--- END TRIAGE STRICT PROMPT ---\n")
+
+                response = llm_client.generate(
+                    config["ollama_base_url"],
+                    model,
+                    strict_prompt,
+                    stream=debug_stream_output,
+                    stream_to_stdout=debug_stream_output,
+                )
                 results = _parse_llm_response(response)
             except Exception as e2:
                 logger.error("Second triage attempt failed (%s), marking batch as REVIEW", e2)

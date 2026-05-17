@@ -1,17 +1,15 @@
 # Ollama
 # Override this if Ollama is reachable on a different host, such as a WSL bridge IP.
 ollama_base_url: "http://localhost:11434"
-triage_model: "qwen3:4b"
+triage_model: "phi4:14b"
 summarize_model: "phi4:14b"
 # vision_model must be a vision-capable Ollama model (llava, moondream, etc.)
 # phi4:14b is text-only and cannot process images.
-vision_model: "qwen3-vl:8b"
-vision_reasoning_model: "qwen3-vl:8b-thinking"
+vision_model: "llava:13b"
 
 # Performance
-triage_batch_size: 50
+triage_batch_size: 8
 max_text_tokens: 2000
-estimate_scan_progress: true
 
 # Cross-drive deduplication registry
 kept_hashes_path: "kept_hashes.csv"
