@@ -24,6 +24,8 @@ without losing progress.
 - Phase 6 copy/manifest/delete commands: copies kept files, writes a delete
   manifest, and deletes files from a supplied manifest when explicitly
   confirmed.
+- Baseline duplicate reporting: exports a combined report of rows on D/E that
+  are redundant with the C baseline scan.
 
 ## Scope Of This README
 
@@ -75,7 +77,9 @@ Important settings:
 - `triage_model`: model used for Phase 2 triage.
 - `summarize_model`: model used for text summarization.
 - `vision_model`: vision-capable model used for image summarization.
+- `estimate_scan_progress`: when true, scan performs a quick pre-count pass so the progress bar can show totals and ETA.
 - `kept_hashes_path`: registry used for cross-drive duplicate detection.
+- `baseline_scan_csv`: optional scan CSV to treat as an authoritative duplicate baseline.
 - `exclude_dirs`: directory names pruned during scan.
 - `exclude_extensions`: file extensions skipped during scan.
 
@@ -98,10 +102,26 @@ python archivist.py scan --drive "D:\" --output reports/drive_d.csv
 Notes:
 
 - The scan progress display includes `Ctrl+C to cancel; rerun to resume`.
+- By default, scan starts with a quick counting pass and then shows an estimated total and ETA.
+- If you want scan to start immediately without the extra counting pass, set `estimate_scan_progress: false` in `config.yaml`.
 - If you interrupt the scan, rerun the same command and Archivist will append
   only unseen rows.
 - Inaccessible directories are recorded in the CSV with an `INACCESSIBLE:`
   comment so you can review what was skipped.
+
+Optional C-baseline cleanup pass:
+
+1. Scan C first:
+
+```bash
+python archivist.py scan --drive /mnt/c/ --output reports/drive_c.csv
+```
+
+2. Set `baseline_scan_csv: "reports/drive_c.csv"` in `config.yaml`.
+
+3. Scan D or E normally. Files whose hashes match the C scan will be marked as
+   duplicates with `duplicate_kind=baseline_scan` and `duplicate_source_path`
+   filled in.
 
 ### 2. Triage the scan with the LLM
 
@@ -111,7 +131,11 @@ python archivist.py triage --csv reports/drive_d.csv
 
 This fills in `recommendation`, `confidence`, and `comment` for rows that do
 not already have a recommendation. Rows marked as duplicates are filled without
-an LLM call.
+an LLM call. If a duplicate came from `baseline_scan_csv`, triage also sets
+`decision=DELETE` when that row does not already have a decision.
+
+Triage, summarize, copy, and delete already use progress bars with known totals,
+so `tqdm` will show completed work, rate, and ETA automatically.
 
 ### 3. Manually review the CSV
 
@@ -120,6 +144,9 @@ Open the CSV in a spreadsheet tool or VS Code and set:
 - `review=True` for rows that should be summarized.
 - `decision=KEEP`, `ARCHIVE`, or `DELETE` for rows that should drive later
   actions.
+
+For a C-baseline cleanup pass, review rows where `duplicate_kind=baseline_scan`
+before generating a delete manifest.
 
 Inheritance is supported, so setting a directory row can affect an entire
 subtree.
@@ -137,7 +164,8 @@ python archivist.py organize --csv reports/drive_d.csv
 ```
 
 This prints a proposed taxonomy and writes `organized_path` values back into
-the CSV.
+the CSV. The command now shows a 2-step progress bar so the user can see when
+taxonomy generation is complete and when file assignment generation is running.
 
 ### 6. Copy the files you want to keep
 
@@ -156,6 +184,31 @@ python archivist.py manifest --csv reports/drive_d.csv
 
 Review `reports/delete_manifest.csv` before deleting anything.
 
+If you want per-drive manifests for multiple CSVs in one step, use:
+
+```bash
+python archivist.py manifest-all \
+  --csv reports/drive_d.csv \
+  --csv reports/drive_e.csv \
+  --output-dir reports/manifests
+```
+
+This writes unique files such as `drive_d_delete_manifest.csv` and
+`drive_e_delete_manifest.csv` so they do not overwrite each other.
+
+### Optional: Export a combined baseline-duplicate report
+
+```bash
+python archivist.py duplicates-report \
+  --csv reports/drive_d.csv \
+  --csv reports/drive_e.csv \
+  --output reports/baseline_duplicates.csv
+```
+
+This writes a derived CSV containing only rows where `duplicate_kind=baseline_scan`.
+It is useful for reviewing everything on D and E that appears redundant with C
+before generating per-drive delete manifests.
+
 ### 8. Delete files from the reviewed manifest
 
 ```bash
@@ -172,6 +225,12 @@ Resolve effective inherited values for a specific path:
 
 ```bash
 python archivist.py resolve --csv reports/drive_d.csv --path "/mnt/d/Users/Stephen/Documents/file.txt"
+```
+
+Export a combined duplicate report for one or more drive CSVs:
+
+```bash
+python archivist.py duplicates-report --csv reports/drive_d.csv --csv reports/drive_e.csv --output reports/baseline_duplicates.csv
 ```
 
 ## Development

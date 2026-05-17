@@ -67,7 +67,7 @@ def run_copy(csv_path: str, dest_root: str, config: dict) -> None:
         print(f"Copied {len(copied_rows)} files. Hashes appended to kept_hashes registry.")
 
 
-def run_manifest(csv_path: str, config: dict) -> None:
+def run_manifest(csv_path: str, config: dict, output_path: str | None = None) -> str:
     df = pd.read_csv(csv_path, dtype=str)
     eff_decision = resolve_all(df, "decision")
 
@@ -90,7 +90,8 @@ def run_manifest(csv_path: str, config: dict) -> None:
                 "decision_source": source,
             })
 
-    manifest_path = os.path.join(os.path.dirname(csv_path), "delete_manifest.csv")
+    manifest_path = output_path or os.path.join(os.path.dirname(csv_path), "delete_manifest.csv")
+    os.makedirs(os.path.dirname(os.path.abspath(manifest_path)), exist_ok=True)
     with open(manifest_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=["path", "filename", "size_bytes", "decision_source"])
         writer.writeheader()
@@ -110,6 +111,21 @@ def run_manifest(csv_path: str, config: dict) -> None:
     print(f"  Explicit decisions:    {explicit_count:,}")
     print(f"  Inherited decisions:   {inherited_count:,}")
     print("\nReview the manifest before running: archivist.py delete --confirm")
+    return manifest_path
+
+
+def run_manifest_batch(csv_paths: list[str], config: dict, output_dir: str | None = None) -> list[str]:
+    if not csv_paths:
+        raise ValueError("At least one CSV path is required")
+
+    manifest_paths = []
+    for csv_path in csv_paths:
+        manifest_path = _batch_manifest_path(csv_path, output_dir)
+        run_manifest(csv_path, config, output_path=manifest_path)
+        manifest_paths.append(manifest_path)
+
+    print(f"\nGenerated {len(manifest_paths)} manifest(s).")
+    return manifest_paths
 
 
 def run_delete(csv_path: str, manifest_path: str, config: dict) -> None:
@@ -244,3 +260,9 @@ def _current_delete_paths(df: pd.DataFrame) -> set[str]:
 def _resolve_source(df: pd.DataFrame, path: str, column: str) -> tuple[str | None, str]:
     from inheritance import resolve_effective
     return resolve_effective(df, path, column)
+
+
+def _batch_manifest_path(csv_path: str, output_dir: str | None) -> str:
+    base_dir = output_dir or os.path.dirname(csv_path)
+    base_name = os.path.splitext(os.path.basename(csv_path))[0]
+    return os.path.join(base_dir, f"{base_name}_delete_manifest.csv")

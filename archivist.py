@@ -53,6 +53,11 @@ def _cmd_manifest(args, config):
     run_manifest(args.csv, config)
 
 
+def _cmd_manifest_all(args, config):
+    from executor import run_manifest_batch
+    run_manifest_batch(args.csv, config, output_dir=args.output_dir)
+
+
 def _cmd_delete(args, config):
     if not args.confirm:
         print("ERROR: --confirm flag required to run delete.")
@@ -69,6 +74,11 @@ def _cmd_resolve(args, config):
     for col in ("review", "decision"):
         val, source = resolve_effective(df, args.path, col)
         print(f"{col:10s}: {val!r:12}  ({source})")
+
+
+def _cmd_duplicates_report(args, config):
+    from reporter import run_duplicates_report
+    run_duplicates_report(args.csv, args.output)
 
 
 def main():
@@ -115,6 +125,12 @@ def main():
     p.add_argument("--csv", required=True)
     p.add_argument("--config", default="config.yaml")
 
+    # manifest-all
+    p = sub.add_parser("manifest-all", help="Generate unique delete manifests for multiple drive CSVs")
+    p.add_argument("--csv", required=True, action="append", help="Input drive CSV. Repeat for multiple drives.")
+    p.add_argument("--output-dir", help="Optional directory for generated manifest files")
+    p.add_argument("--config", default="config.yaml")
+
     # delete
     p = sub.add_parser("delete", help="Phase 6c: delete files listed in manifest (requires --confirm)")
     p.add_argument("--csv", required=True)
@@ -128,6 +144,12 @@ def main():
     p.add_argument("--path", required=True, help="Path to resolve (must match a row in the CSV)")
     p.add_argument("--config", default="config.yaml")
 
+    # duplicates-report
+    p = sub.add_parser("duplicates-report", help="Export rows that are redundant with the baseline scan into a report CSV")
+    p.add_argument("--csv", required=True, action="append", help="Input drive CSV. Repeat for multiple drives.")
+    p.add_argument("--output", required=True, help="Output CSV path for the combined baseline-duplicate report")
+    p.add_argument("--config", default="config.yaml")
+
     args = parser.parse_args()
     config = load_config(args.config)
 
@@ -138,8 +160,10 @@ def main():
         "organize": _cmd_organize,
         "copy": _cmd_copy,
         "manifest": _cmd_manifest,
+        "manifest-all": _cmd_manifest_all,
         "delete": _cmd_delete,
         "resolve": _cmd_resolve,
+        "duplicates-report": _cmd_duplicates_report,
     }
     dispatch[args.command](args, config)
 
