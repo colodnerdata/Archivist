@@ -179,6 +179,31 @@ def test_inaccessible_dir_gets_recorded(tmp_path, basic_config, monkeypatch):
     assert "INACCESSIBLE" in denied_rows[0]["comment"]
 
 
+def test_inaccessible_dir_updates_progress(tmp_path, basic_config, monkeypatch):
+    denied_path = str(tmp_path / "protected")
+    progress_updates = []
+
+    class FakeTqdm:
+        def update(self, amount):
+            progress_updates.append(amount)
+
+        def close(self):
+            pass
+
+    def fake_walk(path, onerror=None):
+        if onerror is not None:
+            onerror(PermissionError(errno.EACCES, "Permission denied", denied_path))
+        yield str(tmp_path), [], []
+
+    monkeypatch.setattr(scanner, "tqdm", lambda *args, **kwargs: FakeTqdm())
+    monkeypatch.setattr(scanner.os, "walk", fake_walk)
+
+    out_csv = str(tmp_path / "out.csv")
+    run_scan(str(tmp_path), out_csv, basic_config)
+
+    assert progress_updates == [1, 1]
+
+
 def test_scan_progress_mentions_ctrl_c(tmp_path, basic_config, monkeypatch):
     captured = {}
 

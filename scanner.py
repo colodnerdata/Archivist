@@ -58,7 +58,7 @@ def run_scan(drive_path: str, output_csv: str, config: dict) -> None:
             _log_walk_error(err)
             error_path = getattr(err, "filename", None)
             if error_path:
-                _write_directory_row(
+                wrote = _write_directory_row(
                     writer,
                     f,
                     seen_paths,
@@ -68,6 +68,8 @@ def run_scan(drive_path: str, output_csv: str, config: dict) -> None:
                     comment=f"INACCESSIBLE: {err.strerror or str(err)}",
                     modified="",
                 )
+                if wrote:
+                    progress.update(1)
 
         try:
             for dirpath, dirnames, filenames in os.walk(drive_path, onerror=on_walk_error):
