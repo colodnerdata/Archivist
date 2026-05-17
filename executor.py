@@ -13,6 +13,8 @@ from inheritance import resolve_all
 
 logger = logging.getLogger(__name__)
 
+_WRITE_BATCH = 50  # flush CSV to disk every N files
+
 
 def run_copy(csv_path: str, dest_root: str, config: dict) -> None:
     df = pd.read_csv(csv_path, dtype=str)
@@ -30,13 +32,14 @@ def run_copy(csv_path: str, dest_root: str, config: dict) -> None:
     ]
 
     copied_rows = []
-    for idx in tqdm(eligible, desc="Copying", unit=" files"):
+    for i, idx in enumerate(tqdm(eligible, desc="Copying", unit=" files")):
         src = str(df.at[idx, "path"])
         organized = str(df.at[idx, "organized_path"]) if "organized_path" in df.columns else ""
         if not organized or organized.strip() == "" or organized.strip().lower() == "nan":
             logger.warning("No organized_path for %s, skipping", src)
             df.at[idx, "copy_status"] = "SKIPPED"
-            safe_write_csv(df, csv_path)
+            if (i + 1) % _WRITE_BATCH == 0:
+                safe_write_csv(df, csv_path)
             continue
 
         dest = os.path.join(dest_root, organized)
@@ -44,10 +47,11 @@ def run_copy(csv_path: str, dest_root: str, config: dict) -> None:
 
         try:
             shutil.copy2(src, dest)
-            if _verify_copy(src, dest):
+            src_md5 = str(df.at[idx, "md5_hash"])
+            if _verify_copy(src, dest, src_md5):
                 df.at[idx, "copy_status"] = "COPIED"
                 copied_rows.append({
-                    "md5_hash": str(df.at[idx, "md5_hash"]),
+                    "md5_hash": src_md5,
                     "original_path": src,
                     "organized_path": organized,
                     "drive": _drive_letter(src),
@@ -60,7 +64,10 @@ def run_copy(csv_path: str, dest_root: str, config: dict) -> None:
             df.at[idx, "copy_status"] = "FAILED"
             logger.error("Copy failed for %s: %s", src, e)
 
-        safe_write_csv(df, csv_path)
+        if (i + 1) % _WRITE_BATCH == 0:
+            safe_write_csv(df, csv_path)
+
+    safe_write_csv(df, csv_path)
 
     if copied_rows:
         _append_kept_hashes(copied_rows, config)
@@ -175,7 +182,7 @@ def run_delete(csv_path: str, manifest_path: str, config: dict) -> None:
         and str(df.at[idx, "is_dir"]).lower() != "true"
     ]
 
-    for idx in tqdm(eligible, desc="Deleting", unit=" files"):
+    for i, idx in enumerate(tqdm(eligible, desc="Deleting", unit=" files")):
         path = str(df.at[idx, "path"])
         try:
             os.remove(path)
@@ -189,7 +196,10 @@ def run_delete(csv_path: str, manifest_path: str, config: dict) -> None:
             df.at[idx, "delete_status"] = "FAILED"
             del_logger.error("FAILED: %s — %s", path, e)
 
-        safe_write_csv(df, csv_path)
+        if (i + 1) % _WRITE_BATCH == 0:
+            safe_write_csv(df, csv_path)
+
+    safe_write_csv(df, csv_path)
 
     # Remove empty directories (leaf first)
     for d in sorted(deleted_dirs, key=lambda x: x.count(os.sep), reverse=True):
@@ -204,11 +214,15 @@ def run_delete(csv_path: str, manifest_path: str, config: dict) -> None:
     print(f"Delete complete. Log written to: {log_path}")
 
 
-def _verify_copy(src: str, dest: str) -> bool:
+def _verify_copy(src: str, dest: str, expected_md5: str) -> bool:
     try:
         if os.path.getsize(src) != os.path.getsize(dest):
             return False
-        return _md5(src) == _md5(dest)
+        dest_md5 = _md5(dest)
+        # Fall back to hashing both sides if scan didn't record an MD5
+        if not expected_md5 or expected_md5.strip().lower() in ("", "nan"):
+            return _md5(src) == dest_md5
+        return dest_md5 == expected_md5
     except Exception as e:
         logger.warning("Verification error: %s", e)
         return False

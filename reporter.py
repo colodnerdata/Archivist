@@ -16,6 +16,9 @@ REPORT_COLUMNS = [
     "comment",
 ]
 
+# Columns needed for filtering + all REPORT_COLUMNS (source_csv is added after load)
+_LOAD_COLUMNS = set(REPORT_COLUMNS) | {"duplicate_kind", "is_dir"} - {"source_csv"}
+
 
 def run_duplicates_report(csv_paths: list[str], output_csv: str) -> None:
     if not csv_paths:
@@ -23,7 +26,7 @@ def run_duplicates_report(csv_paths: list[str], output_csv: str) -> None:
 
     report_frames: list[pd.DataFrame] = []
     for csv_path in csv_paths:
-        df = pd.read_csv(csv_path, dtype=str)
+        df = pd.read_csv(csv_path, dtype=str, usecols=lambda c: c in _LOAD_COLUMNS)
         duplicate_kind = df.get("duplicate_kind", pd.Series("", index=df.index, dtype=str)).fillna("")
         is_dir = df.get("is_dir", pd.Series("False", index=df.index, dtype=str)).fillna("False")
         filtered = df[

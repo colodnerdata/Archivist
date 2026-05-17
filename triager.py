@@ -108,10 +108,8 @@ def _mark_duplicates(df: pd.DataFrame) -> pd.DataFrame:
     blank_decision = decision.isna() | (decision == "")
     df.loc[baseline_dup_mask & blank_decision, "decision"] = "DELETE"
     # Only set comment if not already set (scanner may have filled it in)
-    no_comment = dup_mask & (
-        df.get("comment", pd.Series(index=df.index, dtype=str)).isna()
-        | (df.get("comment", pd.Series(index=df.index, dtype=str)) == "")
-    )
+    comment_col = df.get("comment", pd.Series(index=df.index, dtype=str))
+    no_comment = dup_mask & (comment_col.isna() | (comment_col == ""))
     df.loc[no_comment, "comment"] = "Duplicate — already in kept_hashes registry"
     return df
 

@@ -117,7 +117,7 @@ def _extract_image(file_path: str) -> str:
     from PIL import Image
     with Image.open(file_path) as img:
         img = img.convert("RGB")
-        img.thumbnail((1024, 1024), Image.LANCZOS)
+        img.thumbnail((1024, 1024), Image.BILINEAR)
         buf = io.BytesIO()
         img.save(buf, format="JPEG", quality=85)
         return base64.b64encode(buf.getvalue()).decode("utf-8")

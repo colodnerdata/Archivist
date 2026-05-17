@@ -114,7 +114,7 @@ def run_scan(drive_path: str, output_csv: str, config: dict) -> None:
                     if ext in exclude_exts:
                         continue
                     file_path = os.path.join(dirpath, filename)
-                    file_norm = _norm(file_path)
+                    file_norm = f"{dir_norm}\\{filename}"
                     if file_norm in seen_paths:
                         continue
 
@@ -307,7 +307,7 @@ def _estimate_remaining_work(
 
         for excl_name in dirnames:
             if excl_name in exclude_dirs:
-                excluded_path = _norm(os.path.join(dirpath, excl_name))
+                excluded_path = f"{dir_norm}\\{excl_name}"
                 if excluded_path not in seen_paths:
                     total += 1
 
@@ -318,8 +318,7 @@ def _estimate_remaining_work(
             if ext in exclude_exts:
                 continue
 
-            file_norm = _norm(os.path.join(dirpath, filename))
-            if file_norm not in seen_paths:
+            if f"{dir_norm}\\{filename}" not in seen_paths:
                 total += 1
 
     return total
