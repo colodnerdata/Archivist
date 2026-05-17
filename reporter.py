@@ -24,9 +24,11 @@ def run_duplicates_report(csv_paths: list[str], output_csv: str) -> None:
     report_frames: list[pd.DataFrame] = []
     for csv_path in csv_paths:
         df = pd.read_csv(csv_path, dtype=str)
+        duplicate_kind = df.get("duplicate_kind", pd.Series("", index=df.index, dtype=str)).fillna("")
+        is_dir = df.get("is_dir", pd.Series("False", index=df.index, dtype=str)).fillna("False")
         filtered = df[
-            (df.get("duplicate_kind", pd.Series(dtype=str)).fillna("") == "baseline_scan")
-            & (df.get("is_dir", "False").str.lower() != "true")
+            (duplicate_kind == "baseline_scan")
+            & (is_dir.str.lower() != "true")
         ].copy()
 
         if filtered.empty:
