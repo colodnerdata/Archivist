@@ -9,7 +9,7 @@ import pandas as pd
 from tqdm import tqdm
 
 from csv_utils import safe_write_csv
-from inheritance import resolve_all
+from inheritance import is_blank, resolve_all, resolve_to_set
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +83,6 @@ def run_manifest(csv_path: str, config: dict, output_path: str | None = None) ->
         eff = eff_decision[idx]
         if eff is not None and str(eff).strip().upper() == "DELETE":
             explicit_val = df.at[idx, "decision"] if "decision" in df.columns else ""
-            from inheritance import is_blank
             if not is_blank(explicit_val) and str(explicit_val).strip().upper() == "DELETE":
                 source = "EXPLICIT"
             else:
@@ -263,12 +262,7 @@ def _load_manifest_paths(manifest_path: str) -> set[str]:
 
 
 def _current_delete_paths(df: pd.DataFrame) -> set[str]:
-    eff_decision = resolve_all(df, "decision")
-    return {
-        str(df.at[idx, "path"])
-        for idx in df.index
-        if eff_decision[idx] is not None and str(eff_decision[idx]).strip().upper() == "DELETE"
-    }
+    return resolve_to_set(df, "decision", "DELETE")
 
 
 def _resolve_source(df: pd.DataFrame, path: str, column: str) -> tuple[str | None, str]:

@@ -33,12 +33,14 @@ def run_scan(drive_path: str, output_csv: str, config: dict) -> None:
 
     local_hashes: dict[str, str] = {}  # md5 -> first seen path in this scan
     estimate_progress = bool(config.get("estimate_scan_progress", True))
-    estimated_total = None
+    estimated_items = None
+    estimated_bytes = None
     try:
         if estimate_progress:
-            estimated_total = _estimate_remaining_work(drive_path, seen_paths, exclude_dirs, exclude_exts)
-            if estimated_total:
-                print(f"Estimated remaining scan work: {estimated_total:,} items")
+            estimated_items, estimated_bytes = _estimate_remaining_work(drive_path, seen_paths, exclude_dirs, exclude_exts)
+            if estimated_items:
+                gb = estimated_bytes / (1024 ** 3) if estimated_bytes else 0
+                print(f"Estimated remaining scan work: {estimated_items:,} files, {gb:.1f} GB")
     except KeyboardInterrupt:
         print(_RESUME_MESSAGE, file=sys.stderr)
         return
@@ -49,16 +51,19 @@ def run_scan(drive_path: str, output_csv: str, config: dict) -> None:
             writer.writeheader()
 
         progress = tqdm(
-            total=estimated_total,
+            total=estimated_bytes if estimated_bytes else None,
             desc="Scanning (Ctrl+C to cancel; rerun to resume)",
-            unit=" items",
+            unit="B",
+            unit_scale=True,
+            unit_divisor=1024,
+            smoothing=0,
         )
 
         def on_walk_error(err: OSError) -> None:
             _log_walk_error(err)
             error_path = getattr(err, "filename", None)
             if error_path:
-                wrote = _write_directory_row(
+                _write_directory_row(
                     writer,
                     f,
                     seen_paths,
@@ -68,8 +73,6 @@ def run_scan(drive_path: str, output_csv: str, config: dict) -> None:
                     comment=f"INACCESSIBLE: {err.strerror or str(err)}",
                     modified="",
                 )
-                if wrote:
-                    progress.update(1)
 
         try:
             for dirpath, dirnames, filenames in os.walk(drive_path, onerror=on_walk_error):
@@ -79,7 +82,7 @@ def run_scan(drive_path: str, output_csv: str, config: dict) -> None:
                 if dir_norm not in seen_paths:
                     dirname_only = os.path.basename(dirpath)
                     excluded = dirname_only in exclude_dirs
-                    wrote = _write_directory_row(
+                    _write_directory_row(
                         writer,
                         f,
                         seen_paths,
@@ -88,13 +91,11 @@ def run_scan(drive_path: str, output_csv: str, config: dict) -> None:
                         confidence="0.99" if excluded else "",
                         comment="Excluded by config" if excluded else "",
                     )
-                    if wrote:
-                        progress.update(1)
 
                 # Emit SKIP rows for excluded subdirs before pruning them
                 for excl_name in dirnames:
                     if excl_name in exclude_dirs:
-                        wrote = _write_directory_row(
+                        _write_directory_row(
                             writer,
                             f,
                             seen_paths,
@@ -103,8 +104,6 @@ def run_scan(drive_path: str, output_csv: str, config: dict) -> None:
                             confidence="0.99",
                             comment="Excluded by config",
                         )
-                        if wrote:
-                            progress.update(1)
 
                 # Prune excluded subdirs so os.walk doesn't descend into them
                 dirnames[:] = [d for d in dirnames if d not in exclude_dirs]
@@ -169,7 +168,7 @@ def run_scan(drive_path: str, output_csv: str, config: dict) -> None:
                     writer.writerow(row)
                     f.flush()
                     seen_paths.add(file_norm)
-                    progress.update(1)
+                    progress.update(size)
         except KeyboardInterrupt:
             print(_RESUME_MESSAGE, file=sys.stderr)
         finally:
@@ -297,19 +296,18 @@ def _estimate_remaining_work(
     seen_paths: set[str],
     exclude_dirs: set[str],
     exclude_exts: set[str],
-) -> int:
-    total = 0
+) -> tuple[int, int]:
+    """Returns (remaining_file_count, remaining_bytes) for files not yet scanned."""
+    total_items = 0
+    total_bytes = 0
 
     for dirpath, dirnames, filenames in os.walk(drive_path):
         dir_norm = _norm(dirpath)
-        if dir_norm not in seen_paths:
-            total += 1
 
         for excl_name in dirnames:
             if excl_name in exclude_dirs:
-                excluded_path = f"{dir_norm}\\{excl_name}"
-                if excluded_path not in seen_paths:
-                    total += 1
+                if f"{dir_norm}\\{excl_name}" not in seen_paths:
+                    total_items += 1
 
         dirnames[:] = [d for d in dirnames if d not in exclude_dirs]
 
@@ -319,6 +317,10 @@ def _estimate_remaining_work(
                 continue
 
             if f"{dir_norm}\\{filename}" not in seen_paths:
-                total += 1
+                total_items += 1
+                try:
+                    total_bytes += os.path.getsize(os.path.join(dirpath, filename))
+                except OSError:
+                    pass
 
-    return total
+    return total_items, total_bytes

@@ -17,7 +17,7 @@ _IMAGE_EXTENSIONS = {
 }
 
 
-def extract(file_path: str, extension: str, config: dict) -> tuple[str, str]:
+def extract(file_path: str, extension: str, config: dict, known_is_complex: bool | None = None) -> tuple[str, str]:
     """
     Returns (content_type, content).
     content_type: 'text' | 'complex_pdf' | 'image_b64' | 'error'
@@ -25,13 +25,16 @@ def extract(file_path: str, extension: str, config: dict) -> tuple[str, str]:
     'complex_pdf' signals that the PDF contains embedded images, very sparse
     text, or other indicators that it is more than plain text.  The caller
     should route it to a vision/thinking model rather than a plain text model.
+
+    known_is_complex: if provided for a PDF, skips per-page image detection
+    and uses the cached value directly, saving repeated pdfplumber work on reruns.
     """
     ext = extension.lower()
     try:
         if ext == ".docx":
             return ("text", _extract_docx(file_path))
         elif ext == ".pdf":
-            text, is_complex = _extract_pdf(file_path)
+            text, is_complex = _extract_pdf(file_path, known_is_complex)
             return ("complex_pdf" if is_complex else "text", text)
         elif ext == ".xlsx":
             return ("text", _extract_xlsx(file_path))
@@ -61,13 +64,17 @@ def _extract_docx(file_path: str) -> str:
 _PDF_SPARSE_TEXT_THRESHOLD = 100
 
 
-def _extract_pdf(file_path: str) -> tuple[str, bool]:
+def _extract_pdf(file_path: str, known_is_complex: bool | None = None) -> tuple[str, bool]:
     """Return (extracted_text, is_complex).
 
     is_complex is True when the PDF has embedded images on any page, or when
     the average extracted character count per page is below
     _PDF_SPARSE_TEXT_THRESHOLD, suggesting the document is scanned, form-heavy,
     or relies on charts/diagrams rather than prose.
+
+    known_is_complex: if provided, skips per-page image detection and uses the
+    cached value. Sparseness is still computed from actual text content since it
+    can't be assumed from the cached flag alone.
     """
     import pdfplumber
     pages: list[str] = []
@@ -77,7 +84,7 @@ def _extract_pdf(file_path: str) -> tuple[str, bool]:
     with pdfplumber.open(file_path) as pdf:
         n_pages = len(pdf.pages)
         for page in pdf.pages:
-            if page.images:
+            if known_is_complex is None and page.images:
                 has_embedded_images = True
             text = page.extract_text()
             if text:
@@ -85,7 +92,10 @@ def _extract_pdf(file_path: str) -> tuple[str, bool]:
                 pages.append(text)
 
     sparse = n_pages > 0 and (total_chars / n_pages) < _PDF_SPARSE_TEXT_THRESHOLD
-    is_complex = has_embedded_images or sparse
+    if known_is_complex is not None:
+        is_complex = known_is_complex or sparse
+    else:
+        is_complex = has_embedded_images or sparse
     return "\n".join(pages), is_complex
 
 

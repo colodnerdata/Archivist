@@ -201,7 +201,8 @@ def test_inaccessible_dir_updates_progress(tmp_path, basic_config, monkeypatch):
     out_csv = str(tmp_path / "out.csv")
     run_scan(str(tmp_path), out_csv, basic_config)
 
-    assert progress_updates == [1, 1]
+    # Directories carry no bytes so they do not advance the byte-based progress bar
+    assert progress_updates == []
 
 
 def test_scan_progress_mentions_ctrl_c(tmp_path, basic_config, monkeypatch):

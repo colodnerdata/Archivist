@@ -6,7 +6,7 @@ from tqdm import tqdm
 import llm_client
 from csv_utils import safe_write_csv
 from extractor import extract, _truncate_to_tokens
-from inheritance import resolve_all
+from inheritance import resolve_all_multi
 
 logger = logging.getLogger(__name__)
 
@@ -41,8 +41,9 @@ def run_summarize(csv_path: str, config: dict) -> None:
 
     df = pd.read_csv(csv_path, dtype=str)
 
-    eff_review = resolve_all(df, "review")
-    eff_decision = resolve_all(df, "decision")
+    resolved = resolve_all_multi(df, ["review", "decision"])
+    eff_review = resolved["review"]
+    eff_decision = resolved["decision"]
 
     eligible = [
         idx for idx in df.index
@@ -53,12 +54,25 @@ def run_summarize(csv_path: str, config: dict) -> None:
 
     if "summary" not in df.columns:
         df["summary"] = ""
+    if "pdf_complexity" not in df.columns:
+        df["pdf_complexity"] = ""
 
     for idx in tqdm(eligible, desc="Summarizing", unit=" files"):
         path = str(df.at[idx, "path"])
         ext = str(df.at[idx, "extension"])
 
-        content_type, content = extract(path, ext, config)
+        known_is_complex: bool | None = None
+        if ext.lower() == ".pdf":
+            cached = str(df.at[idx, "pdf_complexity"]).strip().lower()
+            if cached == "complex":
+                known_is_complex = True
+            elif cached == "simple":
+                known_is_complex = False
+
+        content_type, content = extract(path, ext, config, known_is_complex=known_is_complex)
+
+        if ext.lower() == ".pdf" and known_is_complex is None:
+            df.at[idx, "pdf_complexity"] = "complex" if content_type == "complex_pdf" else "simple"
 
         try:
             if content_type == "error":
