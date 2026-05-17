@@ -41,16 +41,22 @@ def test_safe_write_csv_retries_then_succeeds(tmp_path, monkeypatch):
 def test_safe_write_csv_writes_pending_on_persistent_lock(tmp_path, monkeypatch):
     path = str(tmp_path / "data.csv")
     pending_path = path + ".pending"
+    tmp_file = path + ".tmp"
     df = pd.DataFrame([{"a": 5}])
 
-    def always_locked(src, dst):
-        raise PermissionError("file is locked")
+    real_replace = os.replace
 
-    monkeypatch.setattr(csv_utils.os, "replace", always_locked)
+    def locked_for_original(src, dst):
+        if dst == path:
+            raise PermissionError("file is locked")
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(csv_utils.os, "replace", locked_for_original)
 
     with pytest.raises(PermissionError, match="Latest data was saved"):
         csv_utils.safe_write_csv(df, path, retries=1, retry_delay_seconds=0)
 
     assert os.path.exists(pending_path)
+    assert not os.path.exists(tmp_file)
     out = pd.read_csv(pending_path)
     assert out["a"].tolist() == [5]

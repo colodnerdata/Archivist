@@ -2,7 +2,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from extractor import _PDF_SPARSE_TEXT_THRESHOLD, _extract_pdf, _truncate_to_tokens, extract
+from extractor import _PDF_SPARSE_TEXT_THRESHOLD, _truncate_to_tokens, extract
 
 
 def test_extract_text_file(tmp_path):
@@ -66,7 +66,7 @@ def _make_mock_pdf(pages_text: list[str], pages_images: list[list]) -> MagicMock
         mock_pages.append(page)
 
     pdf = MagicMock()
-    pdf.__enter__ = lambda s: s
+    pdf.__enter__ = MagicMock(return_value=pdf)
     pdf.__exit__ = MagicMock(return_value=False)
     pdf.pages = mock_pages
     return pdf
@@ -127,7 +127,7 @@ def test_pdf_dense_text_no_images_returns_text(tmp_path):
     assert content_type == "text"
 
 
-def test_pdf_empty_returns_complex_pdf_not_raising(tmp_path):
+def test_pdf_empty_returns_text_not_raising(tmp_path):
     """A zero-page PDF should not raise; falls through as non-complex (no pages to check)."""
     f = tmp_path / "empty.pdf"
     f.write_bytes(b"%PDF-1.4 fake")
