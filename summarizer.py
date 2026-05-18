@@ -1,4 +1,5 @@
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pandas as pd
 from tqdm import tqdm
@@ -7,6 +8,8 @@ import llm_client
 from csv_utils import safe_write_csv
 from extractor import extract, _truncate_to_tokens
 from inheritance import resolve_all_multi
+
+_WRITE_BATCH = 10
 
 logger = logging.getLogger(__name__)
 
@@ -57,10 +60,11 @@ def run_summarize(csv_path: str, config: dict) -> None:
     if "pdf_complexity" not in df.columns:
         df["pdf_complexity"] = ""
 
-    for idx in tqdm(eligible, desc="Summarizing", unit=" files"):
+    # Snapshot per-file args from df before submitting (workers must not touch df)
+    job_args: list[tuple[int, str, str, bool | None]] = []
+    for idx in eligible:
         path = str(df.at[idx, "path"])
         ext = str(df.at[idx, "extension"])
-
         known_is_complex: bool | None = None
         if ext.lower() == ".pdf":
             cached = str(df.at[idx, "pdf_complexity"]).strip().lower()
@@ -68,37 +72,66 @@ def run_summarize(csv_path: str, config: dict) -> None:
                 known_is_complex = True
             elif cached == "simple":
                 known_is_complex = False
+        job_args.append((idx, path, ext, known_is_complex))
 
-        content_type, content = extract(path, ext, config, known_is_complex=known_is_complex)
+    max_workers = int(config.get("max_workers", 1))
+    completed = 0
 
-        if ext.lower() == ".pdf" and known_is_complex is None:
-            df.at[idx, "pdf_complexity"] = "complex" if content_type == "complex_pdf" else "simple"
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {
+            pool.submit(_run_summarize_file, idx, path, ext, config, known_is_complex): idx
+            for idx, path, ext, known_is_complex in job_args
+        }
+        for future in tqdm(as_completed(futures), total=len(futures), desc="Summarizing", unit=" files"):
+            try:
+                idx, summary, content_type = future.result()
+            except Exception as e:
+                idx = futures[future]
+                logger.error("Worker crashed for idx %s: %s", idx, e)
+                summary, content_type = f"LLM_ERROR: {e}", "error"
 
-        try:
-            if content_type == "error":
-                summary = f"UNREADABLE: {content}"
-            elif content_type == "image_b64":
-                summary = llm_client.chat_with_image(
-                    config["ollama_base_url"], vision_model, _VISION_PROMPT, content
-                )
-            elif content_type == "complex_pdf":
-                truncated = _truncate_to_tokens(content, int(config.get("max_text_tokens", 2000)))
-                prompt = _COMPLEX_PDF_PROMPT_TEMPLATE.format(text=truncated)
-                summary = llm_client.generate(
-                    config["ollama_base_url"], vision_pdf_model, prompt, temperature=0.3
-                )
-            else:
-                truncated = _truncate_to_tokens(content, int(config.get("max_text_tokens", 2000)))
-                prompt = _DOC_PROMPT_TEMPLATE.format(text=truncated)
-                summary = llm_client.generate(
-                    config["ollama_base_url"], summarize_model, prompt, temperature=0.3
-                )
-        except Exception as e:
-            logger.error("LLM error for %s: %s", path, e)
-            summary = f"LLM_ERROR: {e}"
+            df.at[idx, "summary"] = summary
+            if str(df.at[idx, "extension"]).lower() == ".pdf" and str(df.at[idx, "pdf_complexity"]).strip() == "":
+                df.at[idx, "pdf_complexity"] = "complex" if content_type == "complex_pdf" else "simple"
+            completed += 1
+            if completed % _WRITE_BATCH == 0:
+                safe_write_csv(df, csv_path)
 
-        df.at[idx, "summary"] = summary.strip()
-        safe_write_csv(df, csv_path)
+    safe_write_csv(df, csv_path)
+
+
+def _run_summarize_file(
+    idx: int,
+    path: str,
+    ext: str,
+    config: dict,
+    known_is_complex: bool | None,
+) -> tuple[int, str, str]:
+    """Worker: extract file content and call LLM. Returns (idx, summary, content_type).
+    Safe to run concurrently — reads no shared state beyond config (immutable)."""
+    summarize_model = config["summarize_model"]
+    vision_model = config["vision_model"]
+    vision_pdf_model = config.get("vision_pdf_model", vision_model)
+    max_tokens = int(config.get("max_text_tokens", 2000))
+
+    content_type, content = extract(path, ext, config, known_is_complex=known_is_complex)
+    try:
+        if content_type == "error":
+            return idx, f"UNREADABLE: {content}", content_type
+        elif content_type == "image_b64":
+            summary = llm_client.chat_with_image(
+                config["ollama_base_url"], vision_model, _VISION_PROMPT, content
+            )
+        elif content_type == "complex_pdf":
+            prompt = _COMPLEX_PDF_PROMPT_TEMPLATE.format(text=_truncate_to_tokens(content, max_tokens))
+            summary = llm_client.generate(config["ollama_base_url"], vision_pdf_model, prompt, temperature=0.3)
+        else:
+            prompt = _DOC_PROMPT_TEMPLATE.format(text=_truncate_to_tokens(content, max_tokens))
+            summary = llm_client.generate(config["ollama_base_url"], summarize_model, prompt, temperature=0.3)
+        return idx, summary.strip(), content_type
+    except Exception as e:
+        logger.error("LLM error for %s: %s", path, e)
+        return idx, f"LLM_ERROR: {e}", content_type
 
 
 def _should_summarize(eff_review, eff_decision) -> bool:

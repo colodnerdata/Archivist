@@ -1,6 +1,7 @@
 import json
 import logging
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pandas as pd
 from tqdm import tqdm
@@ -35,62 +36,79 @@ def run_triage(csv_path: str, config: dict) -> None:
 
     batch_size = int(config.get("triage_batch_size", 50))
     batches = [needs_triage[i:i + batch_size] for i in range(0, len(needs_triage), batch_size)]
+    max_workers = int(config.get("max_workers", 1))
+    total_batches = len(batches)
 
-    for batch_num, batch_indices in enumerate(tqdm(batches, desc="Triaging", unit=" batches"), start=1):
-        rows = df.loc[batch_indices, ["path", "filename", "extension", "is_dir", "size_bytes", "modified"]].to_dict("records")
-        prompt = _build_batch_prompt(rows)
+    # Pre-build all row dicts in the main thread (df access is not thread-safe)
+    prepared = [
+        (batch_indices,
+         df.loc[batch_indices, ["path", "filename", "extension", "is_dir", "size_bytes", "modified"]].to_dict("records"))
+        for batch_indices in batches
+    ]
 
-        if debug_print_prompt and batch_num <= debug_prompt_batches:
-            shown = prompt[:debug_prompt_max_chars]
-            if len(prompt) > debug_prompt_max_chars:
-                shown += "\n... [prompt truncated]"
-            print(f"\n--- TRIAGE PROMPT batch {batch_num}/{len(batches)} ({len(prompt)} chars) ---")
-            print(shown)
-            print("--- END TRIAGE PROMPT ---\n")
-
-        if debug_stream_output:
-            print(f"[triage] batch {batch_num}/{len(batches)} streaming response from model '{model}'...")
-
-        try:
-            response = llm_client.generate(
-                config["ollama_base_url"],
-                model,
-                prompt,
-                stream=debug_stream_output,
-                stream_to_stdout=debug_stream_output,
-            )
-            results = _parse_llm_response(response)
-        except (ValueError, Exception) as e:
-            logger.warning("First triage attempt failed (%s), retrying with strict prompt", e)
-            try:
-                strict_prompt = prompt + _STRICT_SUFFIX
-                if debug_print_prompt and batch_num <= debug_prompt_batches:
-                    shown = strict_prompt[:debug_prompt_max_chars]
-                    if len(strict_prompt) > debug_prompt_max_chars:
-                        shown += "\n... [strict prompt truncated]"
-                    print(f"\n--- TRIAGE STRICT PROMPT batch {batch_num}/{len(batches)} ({len(strict_prompt)} chars) ---")
-                    print(shown)
-                    print("--- END TRIAGE STRICT PROMPT ---\n")
-
-                response = llm_client.generate(
-                    config["ollama_base_url"],
-                    model,
-                    strict_prompt,
-                    stream=debug_stream_output,
-                    stream_to_stdout=debug_stream_output,
-                )
-                results = _parse_llm_response(response)
-            except Exception as e2:
-                logger.error("Second triage attempt failed (%s), marking batch as REVIEW", e2)
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {
+            pool.submit(_run_batch, batch_indices, rows, config, batch_num, total_batches): batch_indices
+            for batch_num, (batch_indices, rows) in enumerate(prepared, start=1)
+        }
+        for future in tqdm(as_completed(futures), total=total_batches, desc="Triaging", unit=" batches"):
+            batch_indices, results, error = future.result()
+            if error is not None:
+                logger.error("Both triage attempts failed (%s), marking batch as REVIEW", error)
                 for idx in batch_indices:
                     df.at[idx, "recommendation"] = "REVIEW"
                     df.at[idx, "confidence"] = "0.5"
                     df.at[idx, "comment"] = "LLM parse error — manual review needed"
-                safe_write_csv(df, csv_path)
-                continue
+            else:
+                df = _apply_batch_results(df, results, batch_indices)
+            safe_write_csv(df, csv_path)
 
-        df = _apply_batch_results(df, results, batch_indices)
-        safe_write_csv(df, csv_path)
+
+def _run_batch(
+    batch_indices: list[int],
+    rows: list[dict],
+    config: dict,
+    batch_num: int,
+    total_batches: int,
+) -> tuple[list[int], list[dict] | None, Exception | None]:
+    """Worker: build prompt, call LLM, retry once on parse failure.
+    Returns (indices, results, error). Safe to run concurrently."""
+    model = config["triage_model"]
+    debug_print = bool(config.get("triage_debug_print_prompt", False))
+    debug_stream = bool(config.get("triage_debug_stream_output", False))
+    debug_max_chars = int(config.get("triage_debug_prompt_max_chars", 4000))
+    debug_batches = int(config.get("triage_debug_prompt_batches", 1))
+
+    prompt = _build_batch_prompt(rows)
+
+    if debug_print and batch_num <= debug_batches:
+        shown = prompt[:debug_max_chars] + ("\n... [truncated]" if len(prompt) > debug_max_chars else "")
+        print(f"\n--- TRIAGE PROMPT batch {batch_num}/{total_batches} ({len(prompt)} chars) ---\n{shown}\n---\n")
+
+    if debug_stream:
+        print(f"[triage] batch {batch_num}/{total_batches} → model '{model}'...")
+
+    try:
+        response = llm_client.generate(
+            config["ollama_base_url"], model, prompt,
+            stream=debug_stream, stream_to_stdout=debug_stream,
+        )
+        return batch_indices, _parse_llm_response(response), None
+    except Exception as e:
+        logger.warning("First triage attempt failed (%s), retrying with strict prompt", e)
+
+    try:
+        strict_prompt = prompt + _STRICT_SUFFIX
+        if debug_print and batch_num <= debug_batches:
+            shown = strict_prompt[:debug_max_chars] + ("\n... [truncated]" if len(strict_prompt) > debug_max_chars else "")
+            print(f"\n--- TRIAGE STRICT PROMPT batch {batch_num}/{total_batches} ---\n{shown}\n---\n")
+        response = llm_client.generate(
+            config["ollama_base_url"], model, strict_prompt,
+            stream=debug_stream, stream_to_stdout=debug_stream,
+        )
+        return batch_indices, _parse_llm_response(response), None
+    except Exception as e2:
+        return batch_indices, None, e2
 
 
 def _mark_duplicates(df: pd.DataFrame) -> pd.DataFrame:
