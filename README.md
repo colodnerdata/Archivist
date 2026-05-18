@@ -8,6 +8,50 @@ keep, and can generate a delete manifest for anything marked for removal.
 The CSV is the working record for the pipeline. You can stop and resume runs
 without losing progress.
 
+## Command Sequence
+
+```bash
+# ── One-time baseline setup ──────────────────────────────────────────────────
+python archivist.py scan --drive /mnt/c/ --output reports/drive_c.csv
+# Set  baseline_scan_csv: "reports/drive_c.csv"  in config.yaml
+
+# ── Per peripheral drive (repeat for each) ───────────────────────────────────
+
+# Phase 1 — scan (resumable; Ctrl+C safe)
+python archivist.py scan --drive /mnt/d/ --output reports/drive_d.csv
+
+# Phase 2a — auto-mark duplicates (instant, no LLM)
+#   Files with an exact copy on C: are auto-marked decision=DELETE.
+#   Review the CSV here before committing LLM time to Phase 2b.
+python archivist.py mark-duplicates --csv reports/drive_d.csv
+
+# Phase 2b — LLM triage of remaining files  [requires Ollama]
+python archivist.py triage --csv reports/drive_d.csv
+
+# Phase 3 — manual review (no command)
+#   Open the CSV in a spreadsheet. Set review=True and
+#   decision=KEEP / ARCHIVE / DELETE on files and directories.
+#   Decisions on a directory row inherit to all files beneath it.
+
+# Phase 4 — summarize reviewed files  [requires Ollama]
+python archivist.py summarize --csv reports/drive_d.csv
+
+# Phase 5 — propose organized_path values  [requires Ollama]
+python archivist.py organize --csv reports/drive_d.csv
+
+# Phase 6a — copy kept files to recovery destination
+python archivist.py copy --csv reports/drive_d.csv --dest /path/to/recovered/
+
+# Phase 6b — generate delete manifest (review before deleting)
+python archivist.py manifest --csv reports/drive_d.csv
+
+# Phase 6c — delete (requires --confirm; validates manifest first)
+python archivist.py delete \
+  --csv reports/drive_d.csv \
+  --manifest reports/delete_manifest.csv \
+  --confirm
+```
+
 ## Current Capabilities
 
 - Phase 1 scan: recursive scan, incremental CSV writes, same-drive and
@@ -80,6 +124,7 @@ Important settings:
 - `estimate_scan_progress`: when true, scan performs a quick pre-count pass so the progress bar can show totals and ETA.
 - `kept_hashes_path`: registry used for cross-drive duplicate detection.
 - `baseline_scan_csv`: optional scan CSV to treat as an authoritative duplicate baseline.
+- `max_workers`: concurrent LLM calls for triage and summarize (default `1`). Set to `3`–`4` alongside `OLLAMA_NUM_PARALLEL` for faster throughput on GPU hardware.
 - `exclude_dirs`: directory names pruned during scan.
 - `exclude_extensions`: file extensions skipped during scan.
 
@@ -123,19 +168,36 @@ python archivist.py scan --drive /mnt/c/ --output reports/drive_c.csv
    duplicates with `duplicate_kind=baseline_scan` and `duplicate_source_path`
    filled in.
 
-### 2. Triage the scan with the LLM
+### 2a. Auto-mark duplicates (no LLM)
+
+```bash
+python archivist.py mark-duplicates --csv reports/drive_d.csv
+```
+
+Applies duplicate rules to the CSV without any LLM calls:
+
+- All duplicate rows get `recommendation=SKIP`.
+- Rows where `duplicate_kind=baseline_scan` (exact copy found on C:) get
+  `decision=DELETE` automatically.
+
+Run this before triage so you can review auto-deletions in the CSV and confirm
+the baseline matches look right before committing any LLM time.
+
+### 2b. Triage remaining files with the LLM
 
 ```bash
 python archivist.py triage --csv reports/drive_d.csv
 ```
 
-This fills in `recommendation`, `confidence`, and `comment` for rows that do
-not already have a recommendation. Rows marked as duplicates are filled without
-an LLM call. If a duplicate came from `baseline_scan_csv`, triage also sets
-`decision=DELETE` when that row does not already have a decision.
+Fills in `recommendation`, `confidence`, and `comment` for rows that do not
+already have a recommendation. Rows already marked by `mark-duplicates` are
+skipped entirely.
 
-Triage, summarize, copy, and delete already use progress bars with known totals,
-so `tqdm` will show completed work, rate, and ETA automatically.
+To run triage faster on GPU hardware, set `max_workers: 3` in `config.yaml`
+and start Ollama with `OLLAMA_NUM_PARALLEL=3 ollama serve`.
+
+Triage, summarize, copy, and delete use progress bars with known totals,
+so `tqdm` shows completed work, rate, and ETA automatically.
 
 ### 3. Manually review the CSV
 
