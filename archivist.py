@@ -28,6 +28,11 @@ def _cmd_scan(args, config):
     run_scan(args.drive, args.output, config)
 
 
+def _cmd_mark_duplicates(args, config):
+    from triager import run_mark_duplicates
+    run_mark_duplicates(args.csv)
+
+
 def _cmd_triage(args, config):
     from triager import run_triage
     run_triage(args.csv, config)
@@ -99,8 +104,13 @@ def main():
     p.add_argument("--output", required=True, help="Output CSV path (e.g. reports/drive_d.csv)")
     p.add_argument("--config", default="config.yaml")
 
+    # mark-duplicates
+    p = sub.add_parser("mark-duplicates", help="Phase 2a: auto-mark duplicates (no LLM); run before triage to review auto-deletions first")
+    p.add_argument("--csv", required=True)
+    p.add_argument("--config", default="config.yaml")
+
     # triage
-    p = sub.add_parser("triage", help="Phase 2: LLM triage of scanned CSV")
+    p = sub.add_parser("triage", help="Phase 2b: LLM triage of scanned CSV (skips rows already marked by mark-duplicates)")
     p.add_argument("--csv", required=True)
     p.add_argument("--config", default="config.yaml")
 
@@ -155,6 +165,7 @@ def main():
 
     dispatch = {
         "scan": _cmd_scan,
+        "mark-duplicates": _cmd_mark_duplicates,
         "triage": _cmd_triage,
         "summarize": _cmd_summarize,
         "organize": _cmd_organize,

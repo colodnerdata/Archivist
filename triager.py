@@ -17,6 +17,38 @@ _STRICT_SUFFIX = (
 )
 
 
+def run_mark_duplicates(csv_path: str) -> None:
+    """Phase 2a: auto-mark duplicates and write results back to CSV. No LLM calls."""
+    df = pd.read_csv(csv_path, dtype=str)
+    df = _mark_duplicates(df)
+
+    dup_mask = df.get("is_duplicate", pd.Series(index=df.index, dtype=str)).str.lower() == "true"
+    kind_col = df.get("duplicate_kind", pd.Series(index=df.index, dtype=str)).fillna("")
+    decision_col = df.get("decision", pd.Series(index=df.index, dtype=str)).str.upper()
+
+    baseline_count = int((dup_mask & (kind_col == "baseline_scan")).sum())
+    kept_count     = int((dup_mask & (kind_col == "kept_hashes")).sum())
+    same_count     = int((dup_mask & (kind_col == "same_drive")).sum())
+    auto_delete    = int((dup_mask & (kind_col == "baseline_scan") & (decision_col == "DELETE")).sum())
+    total_dup      = int(dup_mask.sum())
+    remaining      = int((~dup_mask).sum())
+
+    safe_write_csv(df, csv_path)
+
+    print(f"\nDuplicate marking complete — {csv_path}")
+    if total_dup == 0:
+        print("  No duplicates found.")
+    else:
+        if baseline_count:
+            print(f"  Baseline (exact copy on C:\\):  {baseline_count:>6,}  → decision: DELETE")
+        if kept_count:
+            print(f"  Already recovered (kept_hashes): {kept_count:>6,}  → recommendation: SKIP")
+        if same_count:
+            print(f"  Same-drive duplicates:           {same_count:>6,}  → recommendation: SKIP")
+        print(f"\n  {auto_delete:,} file(s) auto-marked DELETE")
+    print(f"  {remaining:,} non-duplicate file(s) remain for LLM triage")
+
+
 def run_triage(csv_path: str, config: dict) -> None:
     model = config["triage_model"]
     llm_client.check_ollama(config["ollama_base_url"], [model])
