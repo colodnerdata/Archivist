@@ -5,7 +5,8 @@
       "Bash(pip install *)",
       "Bash(python *)",
       "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\Stephen_Colodner\\\\windows code\\\\archivist\" -Force)",
-      "Bash(Select-Object -Property Name, PSIsContainer)"
+      "Bash(Select-Object -Property Name, PSIsContainer)",
+      "Bash(python3 *)"
     ]
   }
 }

@@ -35,16 +35,16 @@ def run_mark_duplicates(csv_path: str) -> None:
 
     safe_write_csv(df, csv_path)
 
-    print(f"\nDuplicate marking complete — {csv_path}")
+    print(f"\nDuplicate marking complete -- {csv_path}")
     if total_dup == 0:
         print("  No duplicates found.")
     else:
         if baseline_count:
-            print(f"  Baseline (exact copy on C:\\):  {baseline_count:>6,}  → decision: DELETE")
+            print(f"  Baseline (exact copy on C:\\):  {baseline_count:>6,}  -> decision: DELETE")
         if kept_count:
-            print(f"  Already recovered (kept_hashes): {kept_count:>6,}  → recommendation: SKIP")
+            print(f"  Already recovered (kept_hashes): {kept_count:>6,}  -> recommendation: SKIP")
         if same_count:
-            print(f"  Same-drive duplicates:           {same_count:>6,}  → recommendation: SKIP")
+            print(f"  Same-drive duplicates:           {same_count:>6,}  -> recommendation: SKIP")
         print(f"\n  {auto_delete:,} file(s) auto-marked DELETE")
     print(f"  {remaining:,} non-duplicate file(s) remain for LLM triage")
 

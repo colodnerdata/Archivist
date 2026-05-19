@@ -21,6 +21,11 @@ CSV_COLUMNS = [
 
 
 def run_scan(drive_path: str, output_csv: str, config: dict) -> None:
+    if not os.path.exists(drive_path):
+        print(f'ERROR: Drive path not found: {drive_path!r}')
+        print('Use a Windows path such as "C:\\" or "D:\\"')
+        sys.exit(1)
+
     baseline_hashes = _load_baseline_hashes(config.get("baseline_scan_csv", ""), output_csv)
     kept_hashes = _load_kept_hashes(config.get("kept_hashes_path", "kept_hashes.csv"))
     exclude_dirs = set(config.get("exclude_dirs", []))

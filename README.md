@@ -10,15 +10,19 @@ without losing progress.
 
 ## Command Sequence
 
-```bash
+Run all commands from **PowerShell as Administrator** — elevated access is needed
+to read protected directories during scan and to delete system-owned files in
+Phase 6.
+
+```powershell
 # ── One-time baseline setup ──────────────────────────────────────────────────
-python archivist.py scan --drive /mnt/c/ --output reports/drive_c.csv
+python archivist.py scan --drive "C:\" --output reports/drive_c.csv
 # Set  baseline_scan_csv: "reports/drive_c.csv"  in config.yaml
 
 # ── Per peripheral drive (repeat for each) ───────────────────────────────────
 
 # Phase 1 — scan (resumable; Ctrl+C safe)
-python archivist.py scan --drive /mnt/d/ --output reports/drive_d.csv
+python archivist.py scan --drive "D:\" --output reports/drive_d.csv
 
 # Phase 2a — auto-mark duplicates (instant, no LLM)
 #   Files with an exact copy on C: are auto-marked decision=DELETE.
@@ -40,15 +44,15 @@ python archivist.py summarize --csv reports/drive_d.csv
 python archivist.py organize --csv reports/drive_d.csv
 
 # Phase 6a — copy kept files to recovery destination
-python archivist.py copy --csv reports/drive_d.csv --dest /path/to/recovered/
+python archivist.py copy --csv reports/drive_d.csv --dest "E:\recovered\"
 
 # Phase 6b — generate delete manifest (review before deleting)
 python archivist.py manifest --csv reports/drive_d.csv
 
 # Phase 6c — delete (requires --confirm; validates manifest first)
-python archivist.py delete \
-  --csv reports/drive_d.csv \
-  --manifest reports/delete_manifest.csv \
+python archivist.py delete `
+  --csv reports/drive_d.csv `
+  --manifest reports/delete_manifest.csv `
   --confirm
 ```
 
@@ -87,26 +91,26 @@ document.
 
 Create and activate a virtual environment:
 
-```bash
+```powershell
 python -m venv .venv
-source .venv/bin/activate
+.venv\Scripts\Activate.ps1
 ```
 
 Install dependencies:
 
-```bash
+```powershell
 pip install -r requirements.txt
 ```
 
 Start Ollama if it is not already running:
 
-```bash
+```powershell
 ollama serve
 ```
 
 Pull the configured models:
 
-```bash
+```powershell
 ollama pull phi4:14b
 ollama pull llava:13b
 ```
@@ -132,14 +136,6 @@ Important settings:
 
 ### 1. Scan a drive
 
-From WSL, prefer Linux-style mount paths:
-
-```bash
-python archivist.py scan --drive /mnt/d/ --output reports/drive_d.csv
-```
-
-From native Windows Python, use a quoted drive path:
-
 ```powershell
 python archivist.py scan --drive "D:\" --output reports/drive_d.csv
 ```
@@ -158,19 +154,19 @@ Optional C-baseline cleanup pass:
 
 1. Scan C first:
 
-```bash
-python archivist.py scan --drive /mnt/c/ --output reports/drive_c.csv
+```powershell
+python archivist.py scan --drive "C:\" --output reports/drive_c.csv
 ```
 
 2. Set `baseline_scan_csv: "reports/drive_c.csv"` in `config.yaml`.
 
-3. Scan D or E normally. Files whose hashes match the C scan will be marked as
+3. Scan D or E normally. Files whose hashes match the C: scan will be marked as
    duplicates with `duplicate_kind=baseline_scan` and `duplicate_source_path`
    filled in.
 
 ### 2a. Auto-mark duplicates (no LLM)
 
-```bash
+```powershell
 python archivist.py mark-duplicates --csv reports/drive_d.csv
 ```
 
@@ -185,7 +181,7 @@ the baseline matches look right before committing any LLM time.
 
 ### 2b. Triage remaining files with the LLM
 
-```bash
+```powershell
 python archivist.py triage --csv reports/drive_d.csv
 ```
 
@@ -215,13 +211,13 @@ subtree.
 
 ### 4. Summarize reviewed files
 
-```bash
+```powershell
 python archivist.py summarize --csv reports/drive_d.csv
 ```
 
 ### 5. Propose an organized recovery structure
 
-```bash
+```powershell
 python archivist.py organize --csv reports/drive_d.csv
 ```
 
@@ -231,8 +227,8 @@ taxonomy generation is complete and when file assignment generation is running.
 
 ### 6. Copy the files you want to keep
 
-```bash
-python archivist.py copy --csv reports/drive_d.csv --dest /path/to/recovered
+```powershell
+python archivist.py copy --csv reports/drive_d.csv --dest "E:\recovered\"
 ```
 
 Copied files are verified and successful hashes are appended to
@@ -240,7 +236,7 @@ Copied files are verified and successful hashes are appended to
 
 ### 7. Generate a delete manifest
 
-```bash
+```powershell
 python archivist.py manifest --csv reports/drive_d.csv
 ```
 
@@ -248,10 +244,10 @@ Review `reports/delete_manifest.csv` before deleting anything.
 
 If you want per-drive manifests for multiple CSVs in one step, use:
 
-```bash
-python archivist.py manifest-all \
-  --csv reports/drive_d.csv \
-  --csv reports/drive_e.csv \
+```powershell
+python archivist.py manifest-all `
+  --csv reports/drive_d.csv `
+  --csv reports/drive_e.csv `
   --output-dir reports/manifests
 ```
 
@@ -260,10 +256,10 @@ This writes unique files such as `drive_d_delete_manifest.csv` and
 
 ### Optional: Export a combined baseline-duplicate report
 
-```bash
-python archivist.py duplicates-report \
-  --csv reports/drive_d.csv \
-  --csv reports/drive_e.csv \
+```powershell
+python archivist.py duplicates-report `
+  --csv reports/drive_d.csv `
+  --csv reports/drive_e.csv `
   --output reports/baseline_duplicates.csv
 ```
 
@@ -273,7 +269,7 @@ before generating per-drive delete manifests.
 
 ### 8. Delete files from the reviewed manifest
 
-```bash
+```powershell
 python archivist.py delete --csv reports/drive_d.csv --manifest reports/delete_manifest.csv --confirm
 ```
 
@@ -285,13 +281,13 @@ a mismatch is detected.
 
 Resolve effective inherited values for a specific path:
 
-```bash
-python archivist.py resolve --csv reports/drive_d.csv --path "/mnt/d/Users/Stephen/Documents/file.txt"
+```powershell
+python archivist.py resolve --csv reports/drive_d.csv --path "D:\Users\Stephen\Documents\file.txt"
 ```
 
 Export a combined duplicate report for one or more drive CSVs:
 
-```bash
+```powershell
 python archivist.py duplicates-report --csv reports/drive_d.csv --csv reports/drive_e.csv --output reports/baseline_duplicates.csv
 ```
 
@@ -299,15 +295,16 @@ python archivist.py duplicates-report --csv reports/drive_d.csv --csv reports/dr
 
 Run tests:
 
-```bash
+```powershell
 pytest -q
 ```
 
 ## Operational Notes
 
-- On WSL, `/mnt/d/` is usually more reliable than `D:\` because shell escaping
-  is simpler.
+- Run all commands from **PowerShell as Administrator** — elevated access is
+  needed to read protected directories during scan and to delete system-owned
+  files in Phase 6.
 - Permission denied errors during scan are common on protected Windows system
-  folders. Those paths are now recorded in the CSV rather than disappearing
-  into logs alone.
+  folders. Those paths are recorded in the CSV rather than disappearing into
+  logs alone.
 - The tool is intended to run locally. There are no cloud API dependencies.
