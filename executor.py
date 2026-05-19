@@ -4,6 +4,7 @@ import logging
 import os
 import shutil
 from datetime import datetime
+from pathlib import PureWindowsPath
 
 import pandas as pd
 from tqdm import tqdm
@@ -173,14 +174,44 @@ def run_delete(csv_path: str, manifest_path: str, config: dict) -> None:
     del_logger.addHandler(log_handler)
     del_logger.setLevel(logging.INFO)
 
+    # Whole-subtree deletions: find directories safe to rmtree at once
+    rmtree_dirs = _find_rmtree_candidates(df, manifest_paths)
+    rmtree_nps = [(_norm_path(d), _norm_path(d) + "\\") for d in rmtree_dirs]
+
+    def _is_covered(path: str) -> bool:
+        p = _norm_path(path)
+        return any(p == n or p.startswith(pf) for n, pf in rmtree_nps)
+
     deleted_dirs: set[str] = set()
     eligible = [
         idx for idx in df.index
         if str(df.at[idx, "path"]) in manifest_paths
         and str(df.at[idx, "delete_status"]).strip().upper() != "DELETED"
         and str(df.at[idx, "is_dir"]).lower() != "true"
+        and not _is_covered(str(df.at[idx, "path"]))
     ]
 
+    # Delete whole subtrees first
+    rmtree_succeeded: list[str] = []
+    if rmtree_dirs:
+        for dir_path in tqdm(rmtree_dirs, desc="Deleting (folders)", unit=" dirs"):
+            try:
+                if os.path.exists(dir_path):
+                    shutil.rmtree(dir_path)
+                rmtree_succeeded.append(dir_path)
+                del_logger.info("RMTREE: %s", dir_path)
+            except Exception as e:
+                del_logger.error("RMTREE FAILED: %s -- %s", dir_path, e)
+
+        if rmtree_succeeded:
+            succeeded_nps = [(_norm_path(d), _norm_path(d) + "\\") for d in rmtree_succeeded]
+            for idx in df.index:
+                p = _norm_path(str(df.at[idx, "path"]))
+                if any(p == n or p.startswith(pf) for n, pf in succeeded_nps):
+                    df.at[idx, "delete_status"] = "DELETED"
+            safe_write_csv(df, csv_path)
+
+    # Delete remaining individual files
     for i, idx in enumerate(tqdm(eligible, desc="Deleting", unit=" files")):
         path = str(df.at[idx, "path"])
         try:
@@ -193,14 +224,14 @@ def run_delete(csv_path: str, manifest_path: str, config: dict) -> None:
             del_logger.info("ALREADY_GONE: %s", path)
         except Exception as e:
             df.at[idx, "delete_status"] = "FAILED"
-            del_logger.error("FAILED: %s — %s", path, e)
+            del_logger.error("FAILED: %s -- %s", path, e)
 
         if (i + 1) % _WRITE_BATCH == 0:
             safe_write_csv(df, csv_path)
 
     safe_write_csv(df, csv_path)
 
-    # Remove empty directories (leaf first)
+    # Remove empty directories left by per-file deletions (leaf first)
     for d in sorted(deleted_dirs, key=lambda x: x.count(os.sep), reverse=True):
         try:
             if os.path.isdir(d) and not os.listdir(d):
@@ -210,6 +241,8 @@ def run_delete(csv_path: str, manifest_path: str, config: dict) -> None:
             del_logger.warning("RMDIR failed for %s: %s", d, e)
 
     log_handler.close()
+    if rmtree_succeeded:
+        print(f"Deleted {len(rmtree_succeeded)} folder(s) as whole subtrees.")
     print(f"Delete complete. Log written to: {log_path}")
 
 
@@ -263,6 +296,49 @@ def _load_manifest_paths(manifest_path: str) -> set[str]:
 
 def _current_delete_paths(df: pd.DataFrame) -> set[str]:
     return resolve_to_set(df, "decision", "DELETE")
+
+
+def _norm_path(path: str) -> str:
+    return str(PureWindowsPath(path)).lower()
+
+
+def _find_rmtree_candidates(df: pd.DataFrame, manifest_paths: set[str]) -> list[str]:
+    """
+    Return the shallowest directory paths that can be deleted as whole subtrees.
+    A directory qualifies if it's in the delete manifest and no descendant has an
+    explicit non-DELETE decision (which would survive the rmtree).
+    """
+    exception_norms: set[str] = set()
+    if "decision" in df.columns:
+        for idx in df.index:
+            val = str(df.at[idx, "decision"]).strip().upper()
+            if val and val not in ("", "NAN", "DELETE"):
+                exception_norms.add(_norm_path(str(df.at[idx, "path"])))
+
+    candidates: list[str] = []
+    for idx in df.index:
+        if str(df.at[idx, "is_dir"]).lower() != "true":
+            continue
+        path = str(df.at[idx, "path"])
+        if path not in manifest_paths:
+            continue
+        if os.path.isdir(path):
+            candidates.append(path)
+
+    def has_exception_under(dir_norm: str) -> bool:
+        prefix = dir_norm + "\\"
+        return any(ep.startswith(prefix) for ep in exception_norms)
+
+    clean = [c for c in candidates if not has_exception_under(_norm_path(c))]
+
+    # Keep only top-level — skip subdirs already covered by a shallower candidate
+    top_level: list[str] = []
+    for c in sorted(clean, key=lambda x: x.count(os.sep)):
+        c_norm = _norm_path(c)
+        if not any(c_norm.startswith(_norm_path(tl) + "\\") for tl in top_level):
+            top_level.append(c)
+
+    return top_level
 
 
 def _resolve_source(df: pd.DataFrame, path: str, column: str) -> tuple[str | None, str]:
