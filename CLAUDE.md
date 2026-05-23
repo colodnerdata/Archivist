@@ -39,6 +39,12 @@ Build/Install:
 pip install -e .             # Install in development mode (editable)
 ```
 
+Interactive wizard (recommended starting point):
+```
+python wizard.py
+```
+The wizard detects the current phase of a CSV, shows a numbered menu, prompts for required inputs, and calls archivist.py. Use it when you're not sure which command to run next.
+
 Key Commands (main entry point is archivist.py):
 
 ```
@@ -60,14 +66,14 @@ python archivist.py organize --csv reports/drive_d.csv
 # Phase 6a: Copy kept files to recovery destination
 python archivist.py copy --csv reports/drive_d.csv --dest E:\recovered\
 
-# Phase 6b: Generate delete manifest for review
-python archivist.py manifest --csv reports/drive_d.csv
+# Phase 6b: Generate delete manifest (can cover multiple drives in one file)
+python archivist.py manifest --csv reports/drive_d.csv --csv reports/drive_e.csv --output reports/delete_manifest.csv
 
-# Phase 6b (multi-drive): Generate per-drive manifests for multiple CSVs
+# Phase 6b (per-drive): Generate one manifest file per drive instead
 python archivist.py manifest-all --csv reports/drive_d.csv --csv reports/drive_e.csv --output-dir reports/
 
-# Phase 6c: Delete files (requires --confirm flag)
-python archivist.py delete --csv reports/drive_d.csv --manifest reports/delete_manifest.csv --confirm
+# Phase 6c: Delete files (pass all CSVs covered by the manifest)
+python archivist.py delete --csv reports/drive_d.csv --csv reports/drive_e.csv --manifest reports/delete_manifest.csv --confirm
 
 # Utility: Resolve effective review/decision for a path
 python archivist.py resolve --csv reports/drive_d.csv --path "/mnt/d/Users/Stephen/Documents"
