@@ -196,7 +196,8 @@ def run_delete(csv_paths: list[str], manifest_path: str, config: dict) -> None:
         # Warn about DELETE paths missing from manifest (added after manifest was generated)
         already_deleted = {
             str(df.at[idx, "path"]) for idx in df.index
-            if str(df.at[idx, "delete_status"]).strip().upper() == "DELETED"
+            if "delete_status" in df.columns
+            and str(df.at[idx, "delete_status"]).strip().upper() == "DELETED"
         }
         uncovered = (current_delete - manifest_paths_for_csv) - already_deleted
         if uncovered:

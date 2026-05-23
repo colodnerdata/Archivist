@@ -159,7 +159,7 @@ def _select_csv() -> str | None:
         for i, p in enumerate(csvs, 1):
             print(f"    {i}. {p}")
         print(f"    {len(csvs)+1}. Enter a different path")
-        print(f"    0. Cancel")
+        print("    0. Cancel")
         raw = input("\n  Pick a number (or paste a path): ").strip()
         if raw == "0":
             return None
