@@ -16,7 +16,7 @@ kept_hashes.csv
 delete_manifest.csv
 *.log
 *.tmp
-
+*.csv
 # Editors
 .vscode/
 .idea/
