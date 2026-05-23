@@ -136,7 +136,7 @@ def test_manifest_includes_inherited_delete(tmp_path, basic_config):
         },
     ])
 
-    run_manifest(csv_path, basic_config)
+    run_manifest([csv_path], basic_config)
 
     manifest_path = os.path.join(os.path.dirname(csv_path), "delete_manifest.csv")
     assert os.path.exists(manifest_path)
@@ -171,7 +171,7 @@ def test_manifest_does_not_include_keep(tmp_path, basic_config):
         "delete_status": "",
     }])
 
-    run_manifest(csv_path, basic_config)
+    run_manifest([csv_path], basic_config)
 
     manifest_path = os.path.join(os.path.dirname(csv_path), "delete_manifest.csv")
     with open(manifest_path, newline="", encoding="utf-8") as f:
@@ -205,7 +205,7 @@ def test_manifest_includes_explicit_delete_from_baseline_duplicate(tmp_path, bas
         "delete_status": "",
     }])
 
-    run_manifest(csv_path, basic_config)
+    run_manifest([csv_path], basic_config)
 
     manifest_path = os.path.join(os.path.dirname(csv_path), "delete_manifest.csv")
     with open(manifest_path, newline="", encoding="utf-8") as f:
@@ -339,7 +339,7 @@ def test_delete_rejects_stale_manifest(tmp_path, basic_config):
         })
 
     with pytest.raises(ValueError, match="Manifest does not match"):
-        run_delete(csv_path, manifest_path, basic_config)
+        run_delete([csv_path], manifest_path, basic_config)
 
     assert doomed.exists()
     assert spared.exists()
@@ -370,10 +370,10 @@ def test_delete_accepts_matching_manifest(tmp_path, basic_config):
         "delete_status": "",
     }])
 
-    run_manifest(csv_path, basic_config)
+    run_manifest([csv_path], basic_config)
     manifest_path = os.path.join(os.path.dirname(csv_path), "delete_manifest.csv")
 
-    run_delete(csv_path, manifest_path, basic_config)
+    run_delete([csv_path], manifest_path, basic_config)
 
     assert not src_file.exists()
     df = pd.read_csv(csv_path, dtype=str)

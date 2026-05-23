@@ -22,7 +22,7 @@ Key constraint: The tool is read-only until Phase 6 — no files are moved or de
 Setup:
 ```
 python -m venv .venv
-source .venv/bin/activate
+.venv\Scripts\Activate.ps1   # PowerShell (Windows)
 pip install -r requirements.txt
 ```
 
@@ -45,7 +45,10 @@ Key Commands (main entry point is archivist.py):
 # Phase 1: Scan a drive
 python archivist.py scan --drive D:\ --output reports/drive_d.csv
 
-# Phase 2: Triage with LLM
+# Phase 2a: Auto-mark duplicates (no LLM — run before triage to review auto-deletions first)
+python archivist.py mark-duplicates --csv reports/drive_d.csv
+
+# Phase 2b: Triage with LLM (skips rows already marked by mark-duplicates)
 python archivist.py triage --csv reports/drive_d.csv
 
 # Phase 4: Summarize reviewed files
@@ -59,6 +62,9 @@ python archivist.py copy --csv reports/drive_d.csv --dest E:\recovered\
 
 # Phase 6b: Generate delete manifest for review
 python archivist.py manifest --csv reports/drive_d.csv
+
+# Phase 6b (multi-drive): Generate per-drive manifests for multiple CSVs
+python archivist.py manifest-all --csv reports/drive_d.csv --csv reports/drive_e.csv --output-dir reports/
 
 # Phase 6c: Delete files (requires --confirm flag)
 python archivist.py delete --csv reports/drive_d.csv --manifest reports/delete_manifest.csv --confirm
@@ -90,7 +96,7 @@ The codebase is organized by pipeline phase + utilities:
 
 - **archivist.py** — CLI orchestration, argument parsing, phase dispatch
 - **scanner.py** (Phase 1) — Recursive filesystem walk, MD5 hashing, resume logic, cross-drive dedup registry
-- **triager.py** (Phase 2) — Batch LLM calls for file triage, JSON parsing with retry logic, auto-mark duplicates
+- **triager.py** (Phase 2a/2b) — `run_mark_duplicates` auto-marks without LLM; `run_triage` batch LLM calls with JSON retry logic; run 2a first so baseline/kept-hash deletions are reviewable before LLM sees them
 - **summarizer.py** (Phase 4) — Extract text/images from files, dispatch to type-specific extractors, generate LLM summaries
 - **organizer.py** (Phase 5) — Two-pass LLM: propose taxonomy → assign files to categories
 - **executor.py** (Phase 6) — Copy files with verification, generate delete manifest, delete with safety checks
@@ -107,7 +113,9 @@ The key pattern for handling directory hierarchies:
 - `resolve_effective(df, row_path, "decision")` walks the path tree upward to find the nearest ancestor with an explicit decision
 - Child values always override parent values
 - Used in Phase 4 to skip summarization of deleted subtrees, Phase 6a/6c to determine which files to copy/delete
-- See inheritance.py for the full logic; uses `resolve_all()` for bulk operations (O(n * depth))
+- `resolve_all(df, column)` — bulk O(n * depth) resolution returning a Series; single-column
+- `resolve_all_multi(df, columns)` — resolves multiple columns in one pass sharing path normalization; use when you need both `review` and `decision` at once
+- `resolve_to_set(df, column, target_value)` — returns the set of paths whose effective value equals `target_value`; used by executor to build the delete set without allocating an intermediate Series
 
 ### Resumability
 
@@ -166,6 +174,10 @@ Common patterns:
 5. **Error handling in LLM calls:** Phase 2 triage retries once with a stricter prompt if JSON parsing fails. Phase 4 summarization fails gracefully per-file (marks summary="UNREADABLE: [error]" or "LLM_ERROR: [error]") and continues.
 
 6. **Phase 3 is manual:** No code for Phase 3 — the user opens the CSV in a spreadsheet tool and sets review and decision columns. The tool provides a resolve command to preview inheritance effects before committing.
+
+7. **Delete manifest safety check:** `run_delete` validates that the manifest exactly matches the current CSV's effective DELETE set before touching any files. If the CSV was edited after the manifest was generated, the run is aborted with a clear error. Always regenerate the manifest after any CSV edits.
+
+8. **Delete log:** Phase 6c writes a timestamped log (`delete_log_YYYYMMDD_HHMMSS.log`) next to the CSV recording every DELETED, ALREADY_GONE, RMTREE, and FAILED operation. Whole-subtree deletions via `shutil.rmtree` are attempted first (for directories whose entire contents are marked DELETE with no exceptions beneath them), then individual files.
 
 ## Development Notes
 

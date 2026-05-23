@@ -55,7 +55,7 @@ def _cmd_copy(args, config):
 
 def _cmd_manifest(args, config):
     from executor import run_manifest
-    run_manifest(args.csv, config)
+    run_manifest(args.csv, config, output_path=args.output)
 
 
 def _cmd_manifest_all(args, config):
@@ -132,7 +132,10 @@ def main():
 
     # manifest
     p = sub.add_parser("manifest", help="Phase 6b: generate delete manifest for review")
-    p.add_argument("--csv", required=True)
+    p.add_argument("--csv", required=True, action="append",
+                   help="Input drive CSV. Repeat for multiple drives: --csv d.csv --csv e.csv")
+    p.add_argument("--output", default=None,
+                   help="Output manifest path (default: delete_manifest.csv next to first CSV)")
     p.add_argument("--config", default="config.yaml")
 
     # manifest-all
@@ -143,7 +146,8 @@ def main():
 
     # delete
     p = sub.add_parser("delete", help="Phase 6c: delete files listed in manifest (requires --confirm)")
-    p.add_argument("--csv", required=True)
+    p.add_argument("--csv", required=True, action="append",
+                   help="Input drive CSV. Repeat for multiple drives: --csv d.csv --csv e.csv")
     p.add_argument("--manifest", required=True, help="Path to delete_manifest.csv")
     p.add_argument("--confirm", action="store_true", help="Required safety flag to enable deletion")
     p.add_argument("--config", default="config.yaml")

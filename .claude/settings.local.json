@@ -6,7 +6,12 @@
       "Bash(python *)",
       "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\Stephen_Colodner\\\\windows code\\\\archivist\" -Force)",
       "Bash(Select-Object -Property Name, PSIsContainer)",
-      "Bash(python3 *)"
+      "Bash(python3 *)",
+      "Bash(.venv\\\\Scripts\\\\python.exe -m pytest tests/test_executor.py -v)",
+      "Bash(Get-ChildItem \"C:\\\\Users\\\\Stephen_Colodner\\\\windows code\\\\archivist\" -Force)",
+      "Bash(Select-Object Name, PSIsContainer)",
+      "Bash(Format-Table -AutoSize)",
+      "PowerShell(Get-ChildItem \"C:\\\\Users\\\\Stephen_Colodner\\\\windows code\\\\archivist\" -Force | Where-Object { $_.PSIsContainer -or $_.Extension -ne '.pyc' } | Select-Object Name | Format-Table -AutoSize)"
     ]
   }
 }
