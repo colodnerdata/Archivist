@@ -1,8 +1,8 @@
 # Ollama
 # Override this if Ollama is reachable on a different host, such as a WSL bridge IP.
 ollama_base_url: "http://localhost:11434"
-triage_model: "phi4:14b"
-summarize_model: "phi4:14b"
+triage_model: "gemma4:e4b"
+summarize_model: "gemma4:e4b"
 # vision_model must be a vision-capable Ollama model (llava, moondream, etc.)
 # phi4:14b is text-only and cannot process images.
 vision_model: "llava:13b"

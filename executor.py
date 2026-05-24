@@ -92,6 +92,9 @@ def run_manifest(csv_paths: list[str], config: dict, output_path: str | None = N
             eff = eff_decision[idx]
             if eff is None or str(eff).strip().upper() != "DELETE":
                 continue
+            del_status = df.at[idx, "delete_status"] if "delete_status" in df.columns else ""
+            if not is_blank(del_status) and str(del_status).strip().upper() in ("DELETED", "ALREADY_GONE"):
+                continue
             explicit_val = df.at[idx, "decision"] if "decision" in df.columns else ""
             if not is_blank(explicit_val) and str(explicit_val).strip().upper() == "DELETE":
                 source = "EXPLICIT"
