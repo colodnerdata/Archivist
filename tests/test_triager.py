@@ -45,13 +45,35 @@ def test_parse_missing_key_raises():
 
 def test_mark_duplicates():
     df = pd.DataFrame([
-        {"path": "a.txt", "is_duplicate": "True",  "recommendation": "", "confidence": "", "comment": "dup comment"},
-        {"path": "b.txt", "is_duplicate": "False", "recommendation": "", "confidence": "", "comment": ""},
+        {"path": "a.txt", "is_duplicate": "True",  "duplicate_kind": "kept_hashes", "recommendation": "", "confidence": "", "comment": "dup comment"},
+        {"path": "b.txt", "is_duplicate": "False", "duplicate_kind": "", "recommendation": "", "confidence": "", "comment": ""},
     ])
     df = _mark_duplicates(df)
     assert df.loc[0, "recommendation"] == "SKIP"
     assert df.loc[0, "confidence"] == "0.99"
     assert df.loc[1, "recommendation"] == ""  # untouched
+
+
+def test_mark_baseline_duplicates_for_deletion():
+    df = pd.DataFrame([
+        {"path": "d.txt", "is_duplicate": "True", "duplicate_kind": "baseline_scan", "recommendation": "", "confidence": "", "comment": "baseline dup"},
+        {"path": "e.txt", "is_duplicate": "True", "duplicate_kind": "same_drive", "recommendation": "", "confidence": "", "comment": "same drive dup"},
+    ])
+
+    df = _mark_duplicates(df)
+
+    assert df.loc[0, "decision"] == "DELETE"
+    assert df.loc[1, "decision"] == ""
+
+
+def test_mark_duplicates_preserves_existing_decision():
+    df = pd.DataFrame([
+        {"path": "d.txt", "is_duplicate": "True", "duplicate_kind": "baseline_scan", "recommendation": "", "confidence": "", "comment": "baseline dup", "decision": "KEEP"},
+    ])
+
+    df = _mark_duplicates(df)
+
+    assert df.loc[0, "decision"] == "KEEP"
 
 
 def test_build_batch_prompt_contains_items():

@@ -4,7 +4,7 @@ import os
 import pandas as pd
 import pytest
 
-from executor import run_copy, run_delete, run_manifest
+from executor import run_copy, run_delete, run_manifest, run_manifest_batch
 
 
 @pytest.fixture
@@ -178,6 +178,102 @@ def test_manifest_does_not_include_keep(tmp_path, basic_config):
         rows = list(csv.DictReader(f))
 
     assert len(rows) == 0
+
+
+def test_manifest_includes_explicit_delete_from_baseline_duplicate(tmp_path, basic_config):
+    csv_path = str(tmp_path / "drive.csv")
+
+    _write_csv(csv_path, [{
+        "path": r"D:\Users\Stephen\dup.txt",
+        "filename": "dup.txt",
+        "extension": ".txt",
+        "is_dir": "False",
+        "size_bytes": "500",
+        "modified": "",
+        "md5_hash": "abc123",
+        "is_duplicate": "True",
+        "duplicate_kind": "baseline_scan",
+        "duplicate_source_path": r"C:\Users\Stephen\dup.txt",
+        "recommendation": "SKIP",
+        "confidence": "0.99",
+        "comment": "Duplicate of baseline scan file C:\\Users\\Stephen\\dup.txt",
+        "review": "",
+        "decision": "DELETE",
+        "summary": "",
+        "organized_path": "",
+        "copy_status": "",
+        "delete_status": "",
+    }])
+
+    run_manifest(csv_path, basic_config)
+
+    manifest_path = os.path.join(os.path.dirname(csv_path), "delete_manifest.csv")
+    with open(manifest_path, newline="", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+
+    assert len(rows) == 1
+    assert rows[0]["path"] == r"D:\Users\Stephen\dup.txt"
+
+
+def test_manifest_batch_writes_unique_files(tmp_path, basic_config):
+    drive_d_csv = str(tmp_path / "drive_d.csv")
+    drive_e_csv = str(tmp_path / "drive_e.csv")
+
+    _write_csv(drive_d_csv, [{
+        "path": r"D:\Users\Stephen\dup.txt",
+        "filename": "dup.txt",
+        "extension": ".txt",
+        "is_dir": "False",
+        "size_bytes": "100",
+        "modified": "",
+        "md5_hash": "abc",
+        "is_duplicate": "True",
+        "recommendation": "SKIP",
+        "confidence": "0.99",
+        "comment": "",
+        "review": "",
+        "decision": "DELETE",
+        "summary": "",
+        "organized_path": "",
+        "copy_status": "",
+        "delete_status": "",
+    }])
+    _write_csv(drive_e_csv, [{
+        "path": r"E:\Users\Stephen\dup2.txt",
+        "filename": "dup2.txt",
+        "extension": ".txt",
+        "is_dir": "False",
+        "size_bytes": "200",
+        "modified": "",
+        "md5_hash": "def",
+        "is_duplicate": "True",
+        "recommendation": "SKIP",
+        "confidence": "0.99",
+        "comment": "",
+        "review": "",
+        "decision": "DELETE",
+        "summary": "",
+        "organized_path": "",
+        "copy_status": "",
+        "delete_status": "",
+    }])
+
+    manifest_paths = run_manifest_batch([drive_d_csv, drive_e_csv], basic_config)
+
+    assert manifest_paths == [
+        os.path.join(str(tmp_path), "drive_d_delete_manifest.csv"),
+        os.path.join(str(tmp_path), "drive_e_delete_manifest.csv"),
+    ]
+    assert os.path.exists(manifest_paths[0])
+    assert os.path.exists(manifest_paths[1])
+
+    with open(manifest_paths[0], newline="", encoding="utf-8") as f:
+        rows_d = list(csv.DictReader(f))
+    with open(manifest_paths[1], newline="", encoding="utf-8") as f:
+        rows_e = list(csv.DictReader(f))
+
+    assert rows_d[0]["path"] == r"D:\Users\Stephen\dup.txt"
+    assert rows_e[0]["path"] == r"E:\Users\Stephen\dup2.txt"
 
 
 def test_delete_rejects_stale_manifest(tmp_path, basic_config):

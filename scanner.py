@@ -1,4 +1,5 @@
 import csv
+import errno
 import hashlib
 import logging
 import os
@@ -10,13 +11,22 @@ from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
 
+_RESUME_MESSAGE = "\nScan interrupted. Re-run the same command to resume from the existing CSV."
+
 CSV_COLUMNS = [
     "path", "filename", "extension", "is_dir", "size_bytes", "modified",
-    "md5_hash", "is_duplicate", "recommendation", "confidence", "comment",
+    "md5_hash", "is_duplicate", "duplicate_kind", "duplicate_source_path",
+    "recommendation", "confidence", "comment",
 ]
 
 
 def run_scan(drive_path: str, output_csv: str, config: dict) -> None:
+    if not os.path.exists(drive_path):
+        print(f'ERROR: Drive path not found: {drive_path!r}')
+        print('Use a Windows path such as "C:\\" or "D:\\"')
+        sys.exit(1)
+
+    baseline_hashes = _load_baseline_hashes(config.get("baseline_scan_csv", ""), output_csv)
     kept_hashes = _load_kept_hashes(config.get("kept_hashes_path", "kept_hashes.csv"))
     exclude_dirs = set(config.get("exclude_dirs", []))
     exclude_exts = set(e.lower() for e in config.get("exclude_extensions", []))
@@ -27,11 +37,32 @@ def run_scan(drive_path: str, output_csv: str, config: dict) -> None:
     os.makedirs(os.path.dirname(os.path.abspath(output_csv)), exist_ok=True)
 
     local_hashes: dict[str, str] = {}  # md5 -> first seen path in this scan
+    estimate_progress = bool(config.get("estimate_scan_progress", True))
+    estimated_items = None
+    estimated_bytes = None
+    try:
+        if estimate_progress:
+            estimated_items, estimated_bytes = _estimate_remaining_work(drive_path, seen_paths, exclude_dirs, exclude_exts)
+            if estimated_items:
+                gb = estimated_bytes / (1024 ** 3) if estimated_bytes else 0
+                print(f"Estimated remaining scan work: {estimated_items:,} files, {gb:.1f} GB")
+    except KeyboardInterrupt:
+        print(_RESUME_MESSAGE, file=sys.stderr)
+        return
 
     with open(output_csv, "a", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=CSV_COLUMNS)
         if not file_exists:
             writer.writeheader()
+
+        progress = tqdm(
+            total=estimated_bytes if estimated_bytes else None,
+            desc="Scanning (Ctrl+C to cancel; rerun to resume)",
+            unit="B",
+            unit_scale=True,
+            unit_divisor=1024,
+            smoothing=0,
+        )
 
         def on_walk_error(err: OSError) -> None:
             _log_walk_error(err)
@@ -49,11 +80,7 @@ def run_scan(drive_path: str, output_csv: str, config: dict) -> None:
                 )
 
         try:
-            for dirpath, dirnames, filenames in tqdm(
-                os.walk(drive_path, onerror=on_walk_error),
-                desc="Scanning (Ctrl+C to cancel; rerun to resume)",
-                unit=" dirs",
-            ):
+            for dirpath, dirnames, filenames in os.walk(drive_path, onerror=on_walk_error):
                 dir_norm = _norm(dirpath)
 
                 # Emit directory row for current directory
@@ -91,7 +118,7 @@ def run_scan(drive_path: str, output_csv: str, config: dict) -> None:
                     if ext in exclude_exts:
                         continue
                     file_path = os.path.join(dirpath, filename)
-                    file_norm = _norm(file_path)
+                    file_norm = f"{dir_norm}\\{filename}"
                     if file_norm in seen_paths:
                         continue
 
@@ -104,15 +131,26 @@ def run_scan(drive_path: str, output_csv: str, config: dict) -> None:
                         size = 0
                         modified = ""
 
-                    md5 = _compute_md5(file_path)
+                    md5, md5_error = _compute_md5(file_path)
                     is_dup = False
-                    comment = ""
-                    if md5 and md5 in kept_hashes:
+                    duplicate_kind = ""
+                    duplicate_source_path = ""
+                    comment = md5_error
+                    if md5 and md5 in baseline_hashes:
                         is_dup = True
+                        duplicate_kind = "baseline_scan"
+                        duplicate_source_path = str(baseline_hashes[md5]["path"])
+                        comment = f"Duplicate of baseline scan file {duplicate_source_path}"
+                    elif md5 and md5 in kept_hashes:
+                        is_dup = True
+                        duplicate_kind = "kept_hashes"
                         h = kept_hashes[md5]
+                        duplicate_source_path = str(h.get("original_path", ""))
                         comment = f"Already kept from {h['original_path']} → {h['organized_path']}"
                     elif md5 and md5 in local_hashes:
                         is_dup = True
+                        duplicate_kind = "same_drive"
+                        duplicate_source_path = local_hashes[md5]
                         comment = f"Duplicate of {local_hashes[md5]} (same drive)"
                     elif md5:
                         local_hashes[md5] = file_norm
@@ -126,6 +164,8 @@ def run_scan(drive_path: str, output_csv: str, config: dict) -> None:
                         "modified": modified,
                         "md5_hash": md5,
                         "is_duplicate": is_dup,
+                        "duplicate_kind": duplicate_kind,
+                        "duplicate_source_path": duplicate_source_path,
                         "recommendation": "",
                         "confidence": "",
                         "comment": comment,
@@ -133,8 +173,11 @@ def run_scan(drive_path: str, output_csv: str, config: dict) -> None:
                     writer.writerow(row)
                     f.flush()
                     seen_paths.add(file_norm)
+                    progress.update(size)
         except KeyboardInterrupt:
-            print("\nScan interrupted. Re-run the same command to resume from the existing CSV.", file=sys.stderr)
+            print(_RESUME_MESSAGE, file=sys.stderr)
+        finally:
+            progress.close()
 
 
 def _write_directory_row(
@@ -146,10 +189,10 @@ def _write_directory_row(
     confidence: str,
     comment: str,
     modified: str | None = None,
-) -> None:
+) -> bool:
     dir_norm = _norm(path)
     if dir_norm in seen_paths:
-        return
+        return False
 
     writer.writerow({
         "path": dir_norm,
@@ -160,12 +203,15 @@ def _write_directory_row(
         "modified": _mtime(path) if modified is None else modified,
         "md5_hash": "",
         "is_duplicate": False,
+        "duplicate_kind": "",
+        "duplicate_source_path": "",
         "recommendation": recommendation,
         "confidence": confidence,
         "comment": comment,
     })
     file_obj.flush()
     seen_paths.add(dir_norm)
+    return True
 
 
 def _norm(path: str) -> str:
@@ -179,16 +225,19 @@ def _mtime(path: str) -> str:
         return ""
 
 
-def _compute_md5(file_path: str) -> str:
+def _compute_md5(file_path: str) -> tuple[str, str]:
+    """Return (md5_hex, error_comment). On success error_comment is empty."""
     h = hashlib.md5()
     try:
         with open(file_path, "rb") as f:
             for chunk in iter(lambda: f.read(65536), b""):
                 h.update(chunk)
-        return h.hexdigest()
+        return h.hexdigest(), ""
     except OSError as e:
         logger.warning("md5 failed for %s: %s", file_path, e)
-        return ""
+        if e.errno == errno.EINVAL:  # OneDrive cloud-only stub not downloaded
+            return "", "OneDrive cloud-only stub — file not downloaded locally"
+        return "", ""
 
 
 def _load_kept_hashes(path: str) -> dict[str, dict]:
@@ -202,6 +251,32 @@ def _load_kept_hashes(path: str) -> dict[str, dict]:
                     result[row["md5_hash"]] = row
     except (OSError, csv.Error) as e:
         logger.warning("Could not load kept_hashes from %s: %s", path, e)
+    return result
+
+
+def _load_baseline_hashes(path: str, output_csv: str) -> dict[str, dict]:
+    result: dict[str, dict] = {}
+    if not path:
+        return result
+
+    if os.path.abspath(path) == os.path.abspath(output_csv):
+        logger.warning("Ignoring baseline_scan_csv because it matches output CSV: %s", path)
+        return result
+
+    if not os.path.exists(path):
+        logger.warning("Baseline scan CSV not found: %s", path)
+        return result
+
+    try:
+        with open(path, newline="", encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                md5_hash = row.get("md5_hash", "")
+                source_path = row.get("path", "")
+                if md5_hash and source_path:
+                    result[md5_hash] = {"path": source_path}
+    except (OSError, csv.Error) as e:
+        logger.warning("Could not load baseline hashes from %s: %s", path, e)
+
     return result
 
 
@@ -219,3 +294,38 @@ def _load_seen_paths(csv_path: str) -> set[str]:
 
 def _log_walk_error(err: OSError) -> None:
     logger.warning("Walk error: %s", err)
+
+
+def _estimate_remaining_work(
+    drive_path: str,
+    seen_paths: set[str],
+    exclude_dirs: set[str],
+    exclude_exts: set[str],
+) -> tuple[int, int]:
+    """Returns (remaining_file_count, remaining_bytes) for files not yet scanned."""
+    total_items = 0
+    total_bytes = 0
+
+    for dirpath, dirnames, filenames in os.walk(drive_path):
+        dir_norm = _norm(dirpath)
+
+        for excl_name in dirnames:
+            if excl_name in exclude_dirs:
+                if f"{dir_norm}\\{excl_name}" not in seen_paths:
+                    total_items += 1
+
+        dirnames[:] = [d for d in dirnames if d not in exclude_dirs]
+
+        for filename in filenames:
+            ext = os.path.splitext(filename)[1].lower()
+            if ext in exclude_exts:
+                continue
+
+            if f"{dir_norm}\\{filename}" not in seen_paths:
+                total_items += 1
+                try:
+                    total_bytes += os.path.getsize(os.path.join(dirpath, filename))
+                except OSError:
+                    pass
+
+    return total_items, total_bytes

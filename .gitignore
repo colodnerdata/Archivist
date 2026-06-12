@@ -16,10 +16,11 @@ kept_hashes.csv
 delete_manifest.csv
 *.log
 *.tmp
-
+*.csv
 # Editors
 .vscode/
 .idea/
+.claude/
 *.swp
 *.swo
 
@@ -27,3 +28,4 @@ delete_manifest.csv
 .DS_Store
 Thumbs.db
 desktop.ini
+.aider*

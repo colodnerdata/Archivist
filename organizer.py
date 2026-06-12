@@ -3,6 +3,7 @@ import logging
 import re
 
 import pandas as pd
+from tqdm import tqdm
 
 import llm_client
 from csv_utils import safe_write_csv
@@ -33,44 +34,51 @@ def run_organize(csv_path: str, config: dict) -> None:
     file_summaries = eligible[["path", "filename", "summary"]].to_dict("records")
 
     print(f"\nOrganizing {len(file_summaries)} files...\n")
-
-    # Phase 1: propose taxonomy
-    taxonomy_prompt = _build_taxonomy_prompt(file_summaries)
-    taxonomy_response = llm_client.generate(
-        config["ollama_base_url"], model, taxonomy_prompt, temperature=0.2
-    )
-    print("=== Proposed Taxonomy ===")
-    print(taxonomy_response)
-    print("========================\n")
-
-    # Phase 2: assign each file to organized_path
-    assignment_prompt = _build_assignment_prompt(taxonomy_response, file_summaries)
-    assignment_response = llm_client.generate(
-        config["ollama_base_url"], model, assignment_prompt, temperature=0.1
-    )
+    progress = tqdm(total=2, desc="Organizing", unit=" step")
 
     try:
-        assignments = _parse_assignment_response(assignment_response)
-    except ValueError as e:
-        logger.error("Failed to parse assignment response: %s", e)
-        print(f"ERROR: Could not parse LLM assignment response: {e}")
-        return
+        progress.set_postfix_str("taxonomy")
+        taxonomy_prompt = _build_taxonomy_prompt(file_summaries)
+        taxonomy_response = llm_client.generate(
+            config["ollama_base_url"], model, taxonomy_prompt, temperature=0.2
+        )
+        progress.update(1)
+        print("=== Proposed Taxonomy ===")
+        print(taxonomy_response)
+        print("========================\n")
 
-    by_path = {a["original_path"]: a["organized_path"] for a in assignments}
+        progress.set_postfix_str("assignments")
+        assignment_prompt = _build_assignment_prompt(taxonomy_response, file_summaries)
+        assignment_response = llm_client.generate(
+            config["ollama_base_url"], model, assignment_prompt, temperature=0.1
+        )
 
-    if "organized_path" not in df.columns:
-        df["organized_path"] = ""
+        try:
+            assignments = _parse_assignment_response(assignment_response)
+        except ValueError as e:
+            logger.error("Failed to parse assignment response: %s", e)
+            print(f"ERROR: Could not parse LLM assignment response: {e}")
+            return
 
-    assigned_count = 0
-    for idx in eligible.index:
-        path = str(df.at[idx, "path"])
-        if path in by_path:
-            df.at[idx, "organized_path"] = by_path[path]
-            assigned_count += 1
+        progress.update(1)
 
-    safe_write_csv(df, csv_path)
-    print(f"Assigned organized_path for {assigned_count}/{len(file_summaries)} files.")
-    print("Review the organized_path column in the CSV before running Phase 6 (copy).")
+        by_path = {a["original_path"]: a["organized_path"] for a in assignments}
+
+        if "organized_path" not in df.columns:
+            df["organized_path"] = ""
+
+        assigned_count = 0
+        for idx in eligible.index:
+            path = str(df.at[idx, "path"])
+            if path in by_path:
+                df.at[idx, "organized_path"] = by_path[path]
+                assigned_count += 1
+
+        safe_write_csv(df, csv_path)
+        print(f"Assigned organized_path for {assigned_count}/{len(file_summaries)} files.")
+        print("Review the organized_path column in the CSV before running Phase 6 (copy).")
+    finally:
+        progress.close()
 
 
 def _build_taxonomy_prompt(file_summaries: list[dict]) -> str:
