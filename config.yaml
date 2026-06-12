@@ -1,6 +1,14 @@
 # Ollama
 ollama_base_url: "http://localhost:11434"
 triage_model: "qwen3:4b"
+# summarize_model uses a larger model than the triage path because
+# summarization quality is prioritized over throughput for this step.
+# phi4:14b was selected as an upgrade from the previous 8B-class model
+# for better long-form summary quality and instruction-following.
+# This materially increases memory usage and inference time, so this
+# configuration is intended only for deployments where the Ollama host
+# has enough capacity to run the 14B summarizer alongside the triage
+# and vision models configured below.
 summarize_model: "phi4:14b"
 # vision_model is used for images.
 vision_model: "qwen3-vl:8b"
