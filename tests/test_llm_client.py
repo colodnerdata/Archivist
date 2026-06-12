@@ -19,6 +19,7 @@ def test_generate_stream_raises_value_error_on_invalid_json(monkeypatch):
     def fake_post(*_args, **_kwargs):
         return _MockStreamResponse([
             '{"response": "hello", "done": false}',
+            "",
             'not json',
         ])
 
