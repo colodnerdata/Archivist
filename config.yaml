@@ -1,8 +1,7 @@
 # Ollama
 # Override this if Ollama is reachable on a different host, such as a WSL bridge IP.
 ollama_base_url: "http://localhost:11434"
-<<<<<<< HEAD
-triage_model: "qwen3:4b"
+triage_model: "phi4:14b"
 # summarize_model uses a larger model than the triage path because
 # summarization quality is prioritized over throughput for this step.
 # phi4:14b was selected as an upgrade from the previous 8B-class model
@@ -17,13 +16,6 @@ vision_model: "qwen3-vl:8b"
 # vision_pdf_model is used for PDFs detected as more than plain text
 # (embedded images, sparse text, charts, forms, scanned pages).
 vision_pdf_model: "qwen3-vl:8b-thinking"
-=======
-triage_model: "phi4:14b"
-summarize_model: "phi4:14b"
-# vision_model must be a vision-capable Ollama model (llava, moondream, etc.)
-# phi4:14b is text-only and cannot process images.
-vision_model: "llava:13b"
->>>>>>> origin/main
 
 # Performance
 triage_batch_size: 8
